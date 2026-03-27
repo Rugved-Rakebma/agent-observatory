@@ -1,0 +1,112 @@
+@import 'tailwindcss';
+
+@theme {
+	--color-void: #06080c;
+	--color-bg: #0a0d12;
+	--color-surface: #0d1117;
+	--color-surface-raised: #111822;
+	--color-surface-hover: #151d2a;
+	--color-border: #1a2332;
+	--color-border-bright: #243044;
+
+	--color-text-primary: #c4cdd9;
+	--color-text-secondary: #6a7b8f;
+	--color-text-dim: #3a4a5c;
+	--color-text-ghost: #1e2b3a;
+
+	--color-status-active: #00cc88;
+	--color-status-active-dim: #00cc8815;
+	--color-status-waiting: #ff9f43;
+	--color-status-waiting-dim: #ff9f4315;
+	--color-status-idle: #4a6fa5;
+	--color-status-idle-dim: #4a6fa510;
+	--color-status-unknown: #3a4a5c;
+	--color-status-unknown-dim: #3a4a5c10;
+
+	--color-accent: #00b4d8;
+	--color-accent-dim: #00b4d820;
+	--color-urgent: #ff4757;
+	--color-urgent-dim: #ff475718;
+
+	--font-display: 'Orbitron', sans-serif;
+	--font-mono: 'Share Tech Mono', 'SF Mono', monospace;
+}
+
+/* ── Base ── */
+body {
+	background-color: var(--color-void);
+	color: var(--color-text-primary);
+	font-family: var(--font-mono);
+	-webkit-font-smoothing: antialiased;
+	overflow: hidden;
+}
+
+/* ── Scanline overlay ── */
+body::after {
+	content: '';
+	position: fixed;
+	inset: 0;
+	pointer-events: none;
+	z-index: 9999;
+	background: repeating-linear-gradient(
+		0deg,
+		transparent,
+		transparent 2px,
+		rgba(0, 0, 0, 0.03) 2px,
+		rgba(0, 0, 0, 0.03) 4px
+	);
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar {
+	width: 4px;
+}
+::-webkit-scrollbar-track {
+	background: transparent;
+}
+::-webkit-scrollbar-thumb {
+	background: var(--color-border);
+	border-radius: 0;
+}
+::-webkit-scrollbar-thumb:hover {
+	background: var(--color-border-bright);
+}
+
+/* ── Keyframes ── */
+@keyframes scan {
+	0% { transform: translateY(-100%); }
+	100% { transform: translateY(100vh); }
+}
+
+@keyframes flicker {
+	0%, 100% { opacity: 1; }
+	50% { opacity: 0.97; }
+	92% { opacity: 1; }
+	93% { opacity: 0.9; }
+	94% { opacity: 1; }
+}
+
+@keyframes pulse-glow {
+	0%, 100% { box-shadow: 0 0 4px var(--glow-color), inset 0 0 4px var(--glow-color); }
+	50% { box-shadow: 0 0 12px var(--glow-color), inset 0 0 8px var(--glow-color); }
+}
+
+@keyframes urgent-beacon {
+	0%, 100% { opacity: 0.6; }
+	50% { opacity: 1; }
+}
+
+@keyframes blink {
+	0%, 100% { opacity: 1; }
+	50% { opacity: 0; }
+}
+
+@keyframes data-stream {
+	0% { background-position: 0% 0%; }
+	100% { background-position: 100% 100%; }
+}
+
+@keyframes boot-in {
+	0% { opacity: 0; transform: translateY(4px); }
+	100% { opacity: 1; transform: translateY(0); }
+}

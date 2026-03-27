@@ -1,0 +1,24 @@
+[package]
+name = "agent-observatory"
+version = "0.1.0"
+description = "Live control room for Claude Code sessions"
+authors = ["Rugved Ambekar"]
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.5.6", features = [] }
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+log = "0.4"
+tauri = { version = "2.10.3", features = ["devtools"] }
+tauri-plugin-log = "2"
+tokio = { version = "1", features = ["full"] }
+dirs = "6"
+libc = "0.2"

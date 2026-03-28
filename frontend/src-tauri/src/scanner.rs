@@ -3,12 +3,13 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-// macOS-specific process inspection (not in libc crate)
 extern "C" {
     fn proc_pidpath(pid: libc::c_int, buf: *mut libc::c_void, bufsize: u32) -> libc::c_int;
 }
 
-/// Raw session file from ~/.claude/sessions/{pid}.json
+use crate::enrichment;
+use crate::hooks::{self, HookState};
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SessionFile {
@@ -18,7 +19,6 @@ struct SessionFile {
     started_at: u64,
 }
 
-/// Session as exposed to the frontend
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
     pub pid: u32,
@@ -30,7 +30,6 @@ pub struct Session {
     pub source: String,
 }
 
-/// Group of sessions sharing the same project directory
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectGroup {
     pub cwd: String,
@@ -38,8 +37,7 @@ pub struct ProjectGroup {
     pub sessions: Vec<Session>,
 }
 
-/// Scan ~/.claude/sessions/ and return grouped sessions
-pub fn scan_sessions() -> Vec<ProjectGroup> {
+pub fn scan_sessions(hook_state: &HookState) -> Vec<ProjectGroup> {
     let sessions_dir = match dirs::home_dir() {
         Some(home) => home.join(".claude").join("sessions"),
         None => return vec![],
@@ -62,7 +60,7 @@ pub fn scan_sessions() -> Vec<ProjectGroup> {
             continue;
         }
 
-        if let Some(session) = read_session_file(&path) {
+        if let Some(session) = read_session_file(&path, hook_state) {
             sessions.push(session);
         }
     }
@@ -70,32 +68,36 @@ pub fn scan_sessions() -> Vec<ProjectGroup> {
     group_by_project(sessions)
 }
 
-fn read_session_file(path: &Path) -> Option<Session> {
+fn read_session_file(path: &Path, hook_state: &HookState) -> Option<Session> {
     let content = std::fs::read_to_string(path).ok()?;
     let file: SessionFile = serde_json::from_str(&content).ok()?;
 
-    // Validate PID is alive
     if !is_pid_alive(file.pid) {
         return None;
     }
 
-    // Validate it's actually a claude process
     if !is_claude_process(file.pid) {
         return None;
     }
 
-    // Resolve cwd to git root for consistent grouping
     let cwd = resolve_git_root(&file.cwd).unwrap_or_else(|| file.cwd.clone());
 
     let source = detect_terminal_source(file.pid);
+
+    let (status, activity) = if let Some(hook) = hooks::get_hook_status(hook_state, &file.session_id) {
+        (hook.status, hook.activity)
+    } else {
+        let inference = enrichment::infer_session_status(&file.session_id, &file.cwd);
+        (inference.status, inference.activity)
+    };
 
     Some(Session {
         pid: file.pid,
         session_id: file.session_id,
         cwd,
         started_at: file.started_at,
-        status: "Unknown".to_string(),
-        activity: None,
+        status,
+        activity,
         source,
     })
 }
@@ -120,9 +122,6 @@ fn get_exe_path(pid: u32) -> Option<String> {
 }
 
 fn is_claude_process(pid: u32) -> bool {
-    // If proc_pidpath works, verify it's claude
-    // If it fails (common on macOS due to security restrictions),
-    // trust the session file — its existence in ~/.claude/sessions/ is proof enough
     match get_exe_path(pid) {
         Some(path) => path.contains("claude") || path.contains("Claude") || path.contains("node"),
         None => true,
@@ -145,7 +144,6 @@ fn resolve_git_root(cwd: &str) -> Option<String> {
 }
 
 fn detect_terminal_source(pid: u32) -> String {
-    // Read TERM_PROGRAM from the process environment
     if let Some(term) = read_process_env(pid, "TERM_PROGRAM") {
         return match term.as_str() {
             "iTerm.app" => "iTerm2".to_string(),
@@ -157,14 +155,12 @@ fn detect_terminal_source(pid: u32) -> String {
         };
     }
 
-    // Fallback: check executable path for VS Code extension
     if let Some(path) = get_exe_path(pid) {
         if path.contains(".vscode") {
             return "VS Code".to_string();
         }
     }
 
-    // Fallback: check VSCODE env vars that survive into terminals
     if read_process_env(pid, "VSCODE_GIT_IPC_HANDLE").is_some()
         || read_process_env(pid, "TERM_PROGRAM_VERSION").as_deref() == Some("vscode")
     {
@@ -174,12 +170,10 @@ fn detect_terminal_source(pid: u32) -> String {
     "Unknown".to_string()
 }
 
-/// Read an environment variable from another process using sysctl KERN_PROCARGS2
 pub fn read_process_env(pid: u32, var_name: &str) -> Option<String> {
     let mut mib: [libc::c_int; 3] = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid as libc::c_int];
     let mut size: libc::size_t = 0;
 
-    // First call: get buffer size
     let ret = unsafe {
         libc::sysctl(
             mib.as_mut_ptr(),
@@ -194,7 +188,6 @@ pub fn read_process_env(pid: u32, var_name: &str) -> Option<String> {
         return None;
     }
 
-    // Second call: get the data
     let mut buf: Vec<u8> = vec![0; size];
     let ret = unsafe {
         libc::sysctl(
@@ -212,8 +205,6 @@ pub fn read_process_env(pid: u32, var_name: &str) -> Option<String> {
 
     buf.truncate(size);
 
-    // Parse KERN_PROCARGS2 format:
-    // [argc: i32] [exec_path\0] [padding\0...] [argv strings\0...] [env strings\0...]
     if buf.len() < 4 {
         return None;
     }
@@ -221,16 +212,13 @@ pub fn read_process_env(pid: u32, var_name: &str) -> Option<String> {
     let argc = i32::from_ne_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
     let mut pos = 4;
 
-    // Skip exec path
     while pos < buf.len() && buf[pos] != 0 {
         pos += 1;
     }
-    // Skip null padding after exec path
     while pos < buf.len() && buf[pos] == 0 {
         pos += 1;
     }
 
-    // Skip argc argv strings
     let mut args_skipped = 0;
     while pos < buf.len() && args_skipped < argc {
         while pos < buf.len() && buf[pos] != 0 {
@@ -240,7 +228,6 @@ pub fn read_process_env(pid: u32, var_name: &str) -> Option<String> {
         args_skipped += 1;
     }
 
-    // Scan environment section for the target variable
     let prefix = format!("{}=", var_name);
     while pos < buf.len() {
         let start = pos;

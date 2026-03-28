@@ -95,11 +95,9 @@
 </script>
 
 <div class="observatory" class:booted style="animation: flicker 8s ease-in-out infinite;">
-	<!-- Scan beam -->
-	<div class="scan-beam"></div>
+<div class="scan-beam"></div>
 
-	<!-- ═══ Top Bar ═══ -->
-	<header class="top-bar">
+<header class="top-bar">
 		<div class="top-bar-left">
 			<span class="observatory-title">OBSERVATORY</span>
 			<span class="top-bar-divider">│</span>
@@ -110,8 +108,7 @@
 		</div>
 	</header>
 
-	<!-- ═══ Status Strip ═══ -->
-	<div class="status-strip">
+<div class="status-strip">
 		<div class="status-strip-cell">
 			<span class="strip-label">AGENTS</span>
 			<span class="strip-value">{totalSessions}</span>
@@ -130,8 +127,7 @@
 		</div>
 	</div>
 
-	<!-- ═══ Main Grid ═══ -->
-	<main class="main-area">
+<main class="main-area">
 		{#if groups.length === 0}
 			<div class="empty-state">
 				<div class="empty-glyph">◇</div>
@@ -141,8 +137,7 @@
 		{:else}
 			{#each groups as group, gi}
 				<section class="project-block" style="animation-delay: {gi * 60}ms;">
-					<!-- Project Header -->
-					<div class="project-header">
+		<div class="project-header">
 						<div class="project-header-left">
 							<span class="project-marker">■</span>
 							<span class="project-name">{group.display_name.toUpperCase()}</span>
@@ -151,8 +146,7 @@
 						<span class="project-path">{shortPath(group.cwd)}</span>
 					</div>
 
-					<!-- Session Rows -->
-					<div class="session-list">
+		<div class="session-list">
 						{#each group.sessions as session, si}
 							{@const meta = statusMeta(session.status)}
 							<button
@@ -165,13 +159,11 @@
 								"
 								onclick={() => focusSession(session)}
 							>
-								<!-- Status indicator -->
-								<div class="session-indicator">
+		<div class="session-indicator">
 									<span class="indicator-glyph" style="color: {meta.color};">{meta.glyph}</span>
 								</div>
 
-								<!-- Core info -->
-								<div class="session-core">
+		<div class="session-core">
 									<div class="session-id-row">
 										<span class="session-source">{session.source}</span>
 										<span class="session-pid">:{session.pid}</span>
@@ -181,8 +173,7 @@
 									{/if}
 								</div>
 
-								<!-- Status tag -->
-								<div class="session-status-tag" style="
+		<div class="session-status-tag" style="
 									color: {meta.color};
 									border-color: {meta.color}30;
 									background: {meta.dim};
@@ -190,8 +181,7 @@
 									{meta.label}
 								</div>
 
-								<!-- Elapsed -->
-								<div class="session-elapsed">
+		<div class="session-elapsed">
 									{elapsed(session.started_at)}
 								</div>
 							</button>
@@ -202,8 +192,7 @@
 		{/if}
 	</main>
 
-	<!-- ═══ Bottom Bar ═══ -->
-	<footer class="bottom-bar">
+<footer class="bottom-bar">
 		<span class="bottom-meta">◈ CLICK TO FOCUS</span>
 		<span class="bottom-meta">POLL: 3s</span>
 		<span class="bottom-meta">macOS {'{'}KERN_PROCARGS2{'}'}</span>
@@ -211,11 +200,6 @@
 </div>
 
 <style>
-	/* ═══════════════════════════════════════════
-	   OBSERVATORY — Command Center
-	   Alien futuristic × brutalist terminal
-	   ═══════════════════════════════════════════ */
-
 	.observatory {
 		display: flex;
 		flex-direction: column;

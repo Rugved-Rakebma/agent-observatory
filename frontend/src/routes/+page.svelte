@@ -11,6 +11,12 @@
 		status: string;
 		activity: string | null;
 		source: string;
+		slug: string | null;
+		model: string | null;
+		context_used: number | null;
+		context_max: number | null;
+		git_branch: string | null;
+		last_message: string | null;
 	}
 
 	interface ProjectGroup {
@@ -25,13 +31,10 @@
 	let booted = $state(false);
 
 	onMount(async () => {
-		// Boot sequence
 		setTimeout(() => { booted = true; }, 100);
 
-		// Live clock
 		const tick = () => {
-			const now = new Date();
-			clock = now.toLocaleTimeString('en-US', { hour12: false });
+			clock = new Date().toLocaleTimeString('en-US', { hour12: false });
 		};
 		tick();
 		const clockInterval = setInterval(tick, 1000);
@@ -85,6 +88,21 @@
 		return cwd.replace(/^\/Users\/[^/]+\//, '~/');
 	}
 
+	function contextPct(session: Session): number | null {
+		if (!session.context_used || !session.context_max) return null;
+		return Math.round((session.context_used / session.context_max) * 100);
+	}
+
+	function contextColor(pct: number): string {
+		if (pct >= 80) return 'var(--color-urgent)';
+		if (pct >= 60) return 'var(--color-status-waiting)';
+		return 'var(--color-status-active)';
+	}
+
+	function sessionLabel(session: Session): string {
+		return session.slug || `${session.source}:${session.pid}`;
+	}
+
 	const totalSessions = $derived(groups.reduce((sum, g) => sum + g.sessions.length, 0));
 	const activeCount = $derived(
 		groups.reduce((sum, g) => sum + g.sessions.filter(s => s.status === 'Working').length, 0)
@@ -94,21 +112,21 @@
 	);
 </script>
 
-<div class="observatory" class:booted style="animation: flicker 8s ease-in-out infinite;">
-<div class="scan-beam"></div>
+<div class="observatory" class:booted>
+	<div class="scan-beam"></div>
 
-<header class="top-bar">
+	<header class="top-bar">
 		<div class="top-bar-left">
 			<span class="observatory-title">OBSERVATORY</span>
 			<span class="top-bar-divider">│</span>
-			<span class="top-bar-meta">SYS.MONITOR v0.1</span>
+			<span class="top-bar-meta">SYS.MONITOR v0.3</span>
 		</div>
 		<div class="top-bar-right">
 			<span class="top-bar-meta">{clock}</span>
 		</div>
 	</header>
 
-<div class="status-strip">
+	<div class="status-strip">
 		<div class="status-strip-cell">
 			<span class="strip-label">AGENTS</span>
 			<span class="strip-value">{totalSessions}</span>
@@ -127,7 +145,7 @@
 		</div>
 	</div>
 
-<main class="main-area">
+	<main class="main-area">
 		{#if groups.length === 0}
 			<div class="empty-state">
 				<div class="empty-glyph">◇</div>
@@ -137,7 +155,7 @@
 		{:else}
 			{#each groups as group, gi}
 				<section class="project-block" style="animation-delay: {gi * 60}ms;">
-		<div class="project-header">
+					<div class="project-header">
 						<div class="project-header-left">
 							<span class="project-marker">■</span>
 							<span class="project-name">{group.display_name.toUpperCase()}</span>
@@ -146,9 +164,10 @@
 						<span class="project-path">{shortPath(group.cwd)}</span>
 					</div>
 
-		<div class="session-list">
+					<div class="session-list">
 						{#each group.sessions as session, si}
 							{@const meta = statusMeta(session.status)}
+							{@const pct = contextPct(session)}
 							<button
 								class="session-row"
 								class:session-waiting={session.status === 'WaitingInput'}
@@ -159,21 +178,43 @@
 								"
 								onclick={() => focusSession(session)}
 							>
-		<div class="session-indicator">
+								<div class="session-indicator">
 									<span class="indicator-glyph" style="color: {meta.color};">{meta.glyph}</span>
 								</div>
 
-		<div class="session-core">
+								<div class="session-core">
+									<!-- Row 1: Identity -->
 									<div class="session-id-row">
-										<span class="session-source">{session.source}</span>
-										<span class="session-pid">:{session.pid}</span>
+										<span class="session-slug">{sessionLabel(session)}</span>
+										{#if session.activity}
+											<span class="session-activity-inline">— {session.activity}</span>
+										{/if}
 									</div>
-									{#if session.activity}
-										<p class="session-activity">{session.activity}</p>
+
+									<!-- Row 2: Metadata -->
+									<div class="session-meta-row">
+										{#if session.model}
+											<span class="session-model">{session.model}</span>
+										{/if}
+										{#if pct !== null}
+											<div class="context-bar-wrap">
+												<div class="context-bar-fill" style="width: {pct}%; background: {contextColor(pct)};"></div>
+											</div>
+											<span class="context-label" style="color: {contextColor(pct)};">{pct}%</span>
+										{/if}
+										{#if session.git_branch}
+											<span class="session-branch">⌥ {session.git_branch}</span>
+										{/if}
+										<span class="session-source-small">{session.source}</span>
+									</div>
+
+									<!-- Row 3: Last message -->
+									{#if session.last_message}
+										<p class="session-message">{session.last_message}</p>
 									{/if}
 								</div>
 
-		<div class="session-status-tag" style="
+								<div class="session-status-tag" style="
 									color: {meta.color};
 									border-color: {meta.color}30;
 									background: {meta.dim};
@@ -181,7 +222,7 @@
 									{meta.label}
 								</div>
 
-		<div class="session-elapsed">
+								<div class="session-elapsed">
 									{elapsed(session.started_at)}
 								</div>
 							</button>
@@ -192,14 +233,15 @@
 		{/if}
 	</main>
 
-<footer class="bottom-bar">
+	<footer class="bottom-bar">
 		<span class="bottom-meta">◈ CLICK TO FOCUS</span>
-		<span class="bottom-meta">POLL: 3s</span>
-		<span class="bottom-meta">macOS {'{'}KERN_PROCARGS2{'}'}</span>
+		<span class="bottom-meta">POLL: 10s</span>
+		<span class="bottom-meta">macOS KERN_PROCARGS2</span>
 	</footer>
 </div>
 
 <style>
+	/* ── Observatory Shell ── */
 	.observatory {
 		display: flex;
 		flex-direction: column;
@@ -211,9 +253,11 @@
 		opacity: 0;
 		transition: opacity 0.6s ease;
 	}
-	.observatory.booted { opacity: 1; }
+	.observatory.booted {
+		opacity: 1;
+		animation: flicker 8s ease-in-out infinite;
+	}
 
-	/* Ambient corner vignette */
 	.observatory::before {
 		content: '';
 		position: absolute;
@@ -223,7 +267,6 @@
 		z-index: 1;
 	}
 
-	/* Slow scanning beam */
 	.scan-beam {
 		position: absolute;
 		top: 0;
@@ -296,9 +339,7 @@
 		padding: 8px 12px;
 		border-right: 1px solid var(--color-border);
 	}
-	.status-strip-cell:last-child {
-		border-right: none;
-	}
+	.status-strip-cell:last-child { border-right: none; }
 	.strip-label {
 		font-size: 9px;
 		letter-spacing: 0.15em;
@@ -401,7 +442,7 @@
 	/* ── Session Row ── */
 	.session-row {
 		display: flex;
-		align-items: center;
+		align-items: flex-start;
 		gap: 12px;
 		padding: 10px 12px;
 		background: var(--color-surface);
@@ -419,11 +460,10 @@
 		border-color: var(--color-border-bright);
 		border-left-color: var(--row-color);
 	}
-	.session-row:hover .session-source {
+	.session-row:hover .session-slug {
 		color: var(--color-text-primary);
 	}
 
-	/* Waiting row urgency */
 	.session-waiting {
 		background: var(--color-urgent-dim);
 		border-color: var(--color-urgent)30;
@@ -444,6 +484,7 @@
 		align-items: center;
 		justify-content: center;
 		flex-shrink: 0;
+		padding-top: 2px;
 	}
 	.indicator-glyph {
 		font-size: 14px;
@@ -453,28 +494,73 @@
 	.session-core {
 		flex: 1;
 		min-width: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 3px;
 	}
+
+	/* Row 1: Identity */
 	.session-id-row {
 		display: flex;
 		align-items: baseline;
-		gap: 2px;
+		gap: 6px;
 	}
-	.session-source {
+	.session-slug {
 		font-size: 12px;
 		color: var(--color-text-secondary);
 		transition: color 0.12s ease;
 	}
-	.session-pid {
-		font-size: 11px;
-		color: var(--color-text-ghost);
-	}
-	.session-activity {
+	.session-activity-inline {
 		font-size: 10px;
 		color: var(--color-text-dim);
-		margin-top: 2px;
+	}
+
+	/* Row 2: Metadata */
+	.session-meta-row {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		font-size: 10px;
+	}
+	.session-model {
+		color: var(--color-text-dim);
+		letter-spacing: 0.08em;
+		font-family: var(--font-display);
+		font-size: 8px;
+	}
+	.context-bar-wrap {
+		width: 40px;
+		height: 4px;
+		background: var(--color-border);
+		overflow: hidden;
+		flex-shrink: 0;
+	}
+	.context-bar-fill {
+		height: 100%;
+		transition: width 0.3s ease;
+	}
+	.context-label {
+		font-size: 9px;
+		font-variant-numeric: tabular-nums;
+	}
+	.session-branch {
+		color: var(--color-text-dim);
+		font-size: 10px;
+	}
+	.session-source-small {
+		font-size: 9px;
+		color: var(--color-text-ghost);
+		margin-left: auto;
+	}
+
+	/* Row 3: Last message */
+	.session-message {
+		font-size: 10px;
+		color: var(--color-text-ghost);
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+		margin: 0;
 	}
 
 	.session-status-tag {
@@ -485,6 +571,7 @@
 		padding: 3px 8px;
 		border: 1px solid;
 		flex-shrink: 0;
+		margin-top: 2px;
 	}
 
 	.session-elapsed {
@@ -494,6 +581,7 @@
 		width: 60px;
 		text-align: right;
 		flex-shrink: 0;
+		margin-top: 2px;
 	}
 
 	/* ── Bottom Bar ── */

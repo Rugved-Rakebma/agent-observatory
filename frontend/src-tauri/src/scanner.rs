@@ -7,7 +7,7 @@ extern "C" {
     fn proc_pidpath(pid: libc::c_int, buf: *mut libc::c_void, bufsize: u32) -> libc::c_int;
 }
 
-use crate::enrichment;
+use crate::enrichment::{self, EnrichmentCache};
 use crate::hooks::{self, HookState};
 
 #[derive(Debug, Deserialize)]
@@ -28,6 +28,12 @@ pub struct Session {
     pub status: String,
     pub activity: Option<String>,
     pub source: String,
+    pub slug: Option<String>,
+    pub model: Option<String>,
+    pub context_used: Option<u64>,
+    pub context_max: Option<u64>,
+    pub git_branch: Option<String>,
+    pub last_message: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,7 +43,7 @@ pub struct ProjectGroup {
     pub sessions: Vec<Session>,
 }
 
-pub fn scan_sessions(hook_state: &HookState) -> Vec<ProjectGroup> {
+pub fn scan_sessions(hook_state: &HookState, cache: &EnrichmentCache) -> Vec<ProjectGroup> {
     let sessions_dir = match dirs::home_dir() {
         Some(home) => home.join(".claude").join("sessions"),
         None => return vec![],
@@ -60,7 +66,7 @@ pub fn scan_sessions(hook_state: &HookState) -> Vec<ProjectGroup> {
             continue;
         }
 
-        if let Some(session) = read_session_file(&path, hook_state) {
+        if let Some(session) = read_session_file(&path, hook_state, cache) {
             sessions.push(session);
         }
     }
@@ -68,7 +74,7 @@ pub fn scan_sessions(hook_state: &HookState) -> Vec<ProjectGroup> {
     group_by_project(sessions)
 }
 
-fn read_session_file(path: &Path, hook_state: &HookState) -> Option<Session> {
+fn read_session_file(path: &Path, hook_state: &HookState, cache: &EnrichmentCache) -> Option<Session> {
     let content = std::fs::read_to_string(path).ok()?;
     let file: SessionFile = serde_json::from_str(&content).ok()?;
 
@@ -81,14 +87,16 @@ fn read_session_file(path: &Path, hook_state: &HookState) -> Option<Session> {
     }
 
     let cwd = resolve_git_root(&file.cwd).unwrap_or_else(|| file.cwd.clone());
-
     let source = detect_terminal_source(file.pid);
 
+    // Always enrich for metadata (slug, model, context, message)
+    let enriched = enrichment::enrich_session(&file.session_id, &file.cwd, cache);
+
+    // Hook status takes priority for status/activity
     let (status, activity) = if let Some(hook) = hooks::get_hook_status(hook_state, &file.session_id) {
         (hook.status, hook.activity)
     } else {
-        let inference = enrichment::infer_session_status(&file.session_id, &file.cwd);
-        (inference.status, inference.activity)
+        (enriched.status, enriched.activity)
     };
 
     Some(Session {
@@ -99,6 +107,12 @@ fn read_session_file(path: &Path, hook_state: &HookState) -> Option<Session> {
         status,
         activity,
         source,
+        slug: enriched.slug,
+        model: enriched.model,
+        context_used: enriched.context_used,
+        context_max: enriched.context_max,
+        git_branch: enriched.git_branch,
+        last_message: enriched.last_message,
     })
 }
 

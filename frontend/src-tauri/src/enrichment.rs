@@ -1,143 +1,334 @@
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
+const MAX_LINE_SIZE: usize = 10 * 1024 * 1024; // 10MB OOM guard
+const TAIL_BYTES: u64 = 32768; // 32KB
+
 #[derive(Debug, Clone)]
-pub struct SessionInference {
+pub struct EnrichedData {
     pub status: String,
     pub activity: Option<String>,
+    pub slug: Option<String>,
+    pub model: Option<String>,
+    pub context_used: Option<u64>,
+    pub context_max: Option<u64>,
+    pub git_branch: Option<String>,
+    pub last_message: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct JsonlEntry {
-    #[serde(rename = "type")]
-    entry_type: Option<String>,
-    message: Option<MessageInfo>,
-    #[serde(rename = "toolUseResult")]
-    tool_use_result: Option<serde_json::Value>,
+impl Default for EnrichedData {
+    fn default() -> Self {
+        Self {
+            status: "Unknown".into(),
+            activity: None,
+            slug: None,
+            model: None,
+            context_used: None,
+            context_max: None,
+            git_branch: None,
+            last_message: None,
+        }
+    }
 }
 
-#[derive(Debug, Deserialize)]
-struct MessageInfo {
-    stop_reason: Option<String>,
-    content: Option<serde_json::Value>,
+pub(crate) struct CacheEntry {
+    mtime: SystemTime,
+    data: EnrichedData,
 }
 
-pub fn infer_session_status(session_id: &str, raw_cwd: &str) -> SessionInference {
-    let default = SessionInference {
-        status: "Unknown".to_string(),
-        activity: None,
-    };
+pub type EnrichmentCache = Arc<Mutex<HashMap<String, CacheEntry>>>;
 
+pub fn new_enrichment_cache() -> EnrichmentCache {
+    Arc::new(Mutex::new(HashMap::new()))
+}
+
+pub fn prune_cache(cache: &EnrichmentCache, active_ids: &[String]) {
+    if let Ok(mut map) = cache.lock() {
+        map.retain(|k, _| active_ids.contains(k));
+    }
+}
+
+pub fn enrich_session(session_id: &str, raw_cwd: &str, cache: &EnrichmentCache) -> EnrichedData {
     let jsonl_path = match find_jsonl_path(session_id, raw_cwd) {
         Some(p) => p,
-        None => return default,
+        None => return EnrichedData::default(),
     };
 
-    let mtime_age = file_age_secs(&jsonl_path).unwrap_or(9999.0);
-
-    let tail = match read_tail(&jsonl_path, 16384) {
-        Some(t) => t,
-        None => return default,
+    let current_mtime = match std::fs::metadata(&jsonl_path).and_then(|m| m.modified()) {
+        Ok(t) => t,
+        Err(_) => return EnrichedData::default(),
     };
 
-    let lines: Vec<&str> = tail.lines().rev().collect();
-
-    let mut last_entry: Option<JsonlEntry> = None;
-    let mut last_tool_name: Option<String> = None;
-
-    for line in &lines {
-        if line.trim().is_empty() {
-            continue;
-        }
-        if let Ok(entry) = serde_json::from_str::<JsonlEntry>(line) {
-            let entry_type = entry.entry_type.as_deref().unwrap_or("");
-
-            if entry_type == "progress" || entry_type == "file-history-snapshot" {
-                continue;
-            }
-
-            if entry_type == "assistant" && last_tool_name.is_none() {
-                last_tool_name = extract_tool_name(&entry);
-            }
-
-            if last_entry.is_none() && (entry_type == "assistant" || entry_type == "user") {
-                last_entry = Some(entry);
-            }
-
-            if last_entry.is_some() && (last_tool_name.is_some() || lines.len() > 20) {
-                break;
+    // Check cache — return cached data if mtime unchanged
+    if let Ok(map) = cache.lock() {
+        if let Some(entry) = map.get(session_id) {
+            if entry.mtime == current_mtime {
+                return entry.data.clone();
             }
         }
     }
 
-    let entry = match last_entry {
-        Some(e) => e,
-        None => return default,
+    // mtime changed — re-parse
+    let mtime_age = SystemTime::now()
+        .duration_since(current_mtime)
+        .unwrap_or(Duration::from_secs(9999))
+        .as_secs_f64();
+
+    let data = match read_tail(&jsonl_path, TAIL_BYTES) {
+        Some(tail) => parse_jsonl_tail(&tail, mtime_age),
+        None => EnrichedData::default(),
     };
 
-    infer_from_entry(entry, mtime_age, last_tool_name).unwrap_or(default)
+    // Update cache
+    if let Ok(mut map) = cache.lock() {
+        map.insert(
+            session_id.to_string(),
+            CacheEntry {
+                mtime: current_mtime,
+                data: data.clone(),
+            },
+        );
+    }
+
+    data
+}
+
+// ── JSONL types ──
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct JsonlEntry {
+    #[serde(rename = "type")]
+    entry_type: Option<String>,
+    message: Option<MessageInfo>,
+    tool_use_result: Option<serde_json::Value>,
+    slug: Option<String>,
+    git_branch: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MessageInfo {
+    model: Option<String>,
+    stop_reason: Option<String>,
+    content: Option<serde_json::Value>,
+    usage: Option<UsageInfo>,
+}
+
+#[derive(Debug, Deserialize)]
+struct UsageInfo {
+    input_tokens: Option<u64>,
+}
+
+// ── Parsing ──
+
+fn parse_jsonl_tail(tail: &str, mtime_age: f64) -> EnrichedData {
+    let mut result = EnrichedData::default();
+    let mut last_entry: Option<JsonlEntry> = None;
+    let mut last_tool_name: Option<String> = None;
+    let mut found_assistant_for_message = false;
+
+    for line in tail.lines().rev() {
+        if line.is_empty() || line.len() > MAX_LINE_SIZE {
+            continue;
+        }
+
+        let entry: JsonlEntry = match serde_json::from_str(line) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+
+        let entry_type = match entry.entry_type.as_deref() {
+            Some(t) => t,
+            None => continue,
+        };
+
+        if entry_type == "progress" || entry_type == "file-history-snapshot" {
+            continue;
+        }
+
+        result.slug = result.slug.or_else(|| entry.slug.clone());
+        result.git_branch = result.git_branch.or_else(|| entry.git_branch.clone());
+
+        // Extract tool name from assistant entries
+        if entry_type == "assistant" && last_tool_name.is_none() {
+            last_tool_name = extract_tool_name(&entry);
+        }
+
+        // Extract model, context, last_message from assistant entries
+        if entry_type == "assistant" && !found_assistant_for_message {
+            if let Some(ref msg) = entry.message {
+                // Model
+                if result.model.is_none() {
+                    if let Some(ref m) = msg.model {
+                        let display = model_display_name(m);
+                        result.context_max = Some(context_max_for_model(m));
+                        result.model = Some(display);
+                    }
+                }
+
+                // Context usage from usage block
+                if result.context_used.is_none() {
+                    if let Some(ref usage) = msg.usage {
+                        result.context_used = usage.input_tokens;
+                    }
+                }
+
+                // Last message text (from end_turn entries only)
+                if result.last_message.is_none() && msg.stop_reason.as_deref() == Some("end_turn") {
+                    result.last_message = extract_last_message(msg);
+                    found_assistant_for_message = true;
+                }
+            }
+        }
+
+        // Status inference from last user/assistant entry
+        if last_entry.is_none() && (entry_type == "assistant" || entry_type == "user") {
+            last_entry = Some(entry);
+            continue;
+        }
+
+        // Stop scanning once we have everything
+        if last_entry.is_some()
+            && result.slug.is_some()
+            && result.model.is_some()
+            && found_assistant_for_message
+        {
+            break;
+        }
+    }
+
+    // Infer status from the last entry
+    if let Some(entry) = last_entry {
+        if let Some(inferred) = infer_from_entry(entry, mtime_age, last_tool_name) {
+            result.status = inferred.status;
+            result.activity = inferred.activity;
+        }
+    }
+
+    result
 }
 
 fn extract_tool_name(entry: &JsonlEntry) -> Option<String> {
     let content = entry.message.as_ref()?.content.as_ref()?;
     let arr = content.as_array()?;
-    arr.iter().rev()
+    arr.iter()
+        .rev()
         .find(|b| b.get("type").and_then(|t| t.as_str()) == Some("tool_use"))
         .and_then(|b| b.get("name"))
         .and_then(|n| n.as_str())
         .map(|s| s.to_string())
 }
 
+fn extract_last_message(msg: &MessageInfo) -> Option<String> {
+    let content = msg.content.as_ref()?;
+    let arr = content.as_array()?;
+
+    // Find the last text block
+    let text = arr
+        .iter()
+        .rev()
+        .find(|b| b.get("type").and_then(|t| t.as_str()) == Some("text"))
+        .and_then(|b| b.get("text"))
+        .and_then(|t| t.as_str())?;
+
+    Some(truncate_at_word(text, 120))
+}
+
+fn truncate_at_word(s: &str, max: usize) -> String {
+    // Normalize whitespace first
+    let normalized: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.len() <= max {
+        return normalized;
+    }
+    // Find last space before max
+    let truncated = &normalized[..max];
+    match truncated.rfind(' ') {
+        Some(pos) => format!("{}...", &truncated[..pos]),
+        None => format!("{}...", truncated),
+    }
+}
+
+struct StatusInference {
+    status: String,
+    activity: Option<String>,
+}
+
 fn infer_from_entry(
     entry: JsonlEntry,
     mtime_age: f64,
     last_tool_name: Option<String>,
-) -> Option<SessionInference> {
+) -> Option<StatusInference> {
     let entry_type = entry.entry_type.as_deref()?;
 
     match entry_type {
         "assistant" => {
-            let stop_reason = entry.message.as_ref()
+            let stop_reason = entry
+                .message
+                .as_ref()
                 .and_then(|m| m.stop_reason.as_deref())
                 .unwrap_or("");
 
             let inference = match stop_reason {
-                "end_turn" if mtime_age < 5.0 => {
-                    SessionInference { status: "Idle".into(), activity: Some("Finished responding".into()) }
-                }
-                "end_turn" => {
-                    SessionInference { status: "Idle".into(), activity: Some("Waiting for prompt".into()) }
-                }
+                "end_turn" if mtime_age < 5.0 => StatusInference {
+                    status: "Idle".into(),
+                    activity: Some("Finished responding".into()),
+                },
+                "end_turn" => StatusInference {
+                    status: "Idle".into(),
+                    activity: Some("Waiting for prompt".into()),
+                },
                 "tool_use" => {
                     let tool_label = last_tool_name.as_deref().unwrap_or("tool");
                     if mtime_age < 10.0 {
-                        SessionInference { status: "Working".into(), activity: Some(format!("Tool: {}", tool_label)) }
+                        StatusInference {
+                            status: "Working".into(),
+                            activity: Some(format!("Tool: {}", tool_label)),
+                        }
                     } else {
-                        SessionInference { status: "WaitingInput".into(), activity: Some(format!("Permission: {}", tool_label)) }
+                        StatusInference {
+                            status: "WaitingInput".into(),
+                            activity: Some(format!("Permission: {}", tool_label)),
+                        }
                     }
                 }
-                _ if mtime_age < 5.0 => {
-                    SessionInference { status: "Working".into(), activity: last_tool_name.map(|t| format!("Tool: {}", t)) }
-                }
-                _ => {
-                    SessionInference { status: "Unknown".into(), activity: None }
-                }
+                _ if mtime_age < 5.0 => StatusInference {
+                    status: "Working".into(),
+                    activity: last_tool_name.map(|t| format!("Tool: {}", t)),
+                },
+                _ => StatusInference {
+                    status: "Unknown".into(),
+                    activity: None,
+                },
             };
             Some(inference)
         }
         "user" => {
             let inference = if entry.tool_use_result.is_some() {
                 if mtime_age < 10.0 {
-                    SessionInference { status: "Working".into(), activity: Some("Processing tool result".into()) }
+                    StatusInference {
+                        status: "Working".into(),
+                        activity: Some("Processing tool result".into()),
+                    }
                 } else {
-                    SessionInference { status: "WaitingInput".into(), activity: Some("May need input".into()) }
+                    StatusInference {
+                        status: "WaitingInput".into(),
+                        activity: Some("May need input".into()),
+                    }
                 }
             } else if mtime_age < 30.0 {
-                SessionInference { status: "Working".into(), activity: Some("Processing prompt".into()) }
+                StatusInference {
+                    status: "Working".into(),
+                    activity: Some("Processing prompt".into()),
+                }
             } else {
-                SessionInference { status: "Idle".into(), activity: Some("Waiting for prompt".into()) }
+                StatusInference {
+                    status: "Idle".into(),
+                    activity: Some("Waiting for prompt".into()),
+                }
             };
             Some(inference)
         }
@@ -145,36 +336,42 @@ fn infer_from_entry(
     }
 }
 
+// ── Helpers ──
+
+fn model_display_name(raw: &str) -> String {
+    if raw.contains("opus") {
+        "Opus".into()
+    } else if raw.contains("sonnet") {
+        "Sonnet".into()
+    } else if raw.contains("haiku") {
+        "Haiku".into()
+    } else {
+        raw.to_string()
+    }
+}
+
+fn context_max_for_model(raw: &str) -> u64 {
+    if raw.contains("haiku") {
+        200_000
+    } else {
+        1_000_000
+    }
+}
+
 fn find_jsonl_path(session_id: &str, raw_cwd: &str) -> Option<PathBuf> {
     let home = dirs::home_dir()?;
-    let encoded = encode_cwd(raw_cwd);
+    let encoded = raw_cwd.replace('/', "-").replace(' ', "-");
     let path = home
         .join(".claude")
         .join("projects")
         .join(&encoded)
         .join(format!("{}.jsonl", session_id));
-
-    if path.exists() {
-        Some(path)
-    } else {
-        None
-    }
-}
-
-fn encode_cwd(cwd: &str) -> String {
-    cwd.replace('/', "-").replace(' ', "-")
-}
-
-fn file_age_secs(path: &Path) -> Option<f64> {
-    let modified = std::fs::metadata(path).ok()?.modified().ok()?;
-    let age = SystemTime::now().duration_since(modified).unwrap_or(Duration::from_secs(9999));
-    Some(age.as_secs_f64())
+    path.exists().then_some(path)
 }
 
 fn read_tail(path: &Path, bytes: u64) -> Option<String> {
     let mut file = std::fs::File::open(path).ok()?;
     let file_size = file.metadata().ok()?.len();
-
     let offset = file_size.saturating_sub(bytes);
     file.seek(SeekFrom::Start(offset)).ok()?;
 

@@ -2,22 +2,26 @@ mod enrichment;
 mod hooks;
 mod scanner;
 
+use enrichment::EnrichmentCache;
 use hooks::HookState;
 use scanner::{scan_sessions, ProjectGroup};
 use tauri::{AppHandle, Emitter};
 
 struct AppState {
     hook_state: HookState,
+    cache: EnrichmentCache,
 }
 
 #[tauri::command]
 fn get_session_groups(state: tauri::State<AppState>) -> Vec<ProjectGroup> {
-    scan_sessions(&state.hook_state)
+    let groups = scan_sessions(&state.hook_state, &state.cache);
+    prune_cache(&state.cache, &groups);
+    groups
 }
 
 #[tauri::command]
 fn focus_session(pid: u32, state: tauri::State<AppState>) -> Result<(), String> {
-    let groups = scan_sessions(&state.hook_state);
+    let groups = scan_sessions(&state.hook_state, &state.cache);
     let session = groups
         .iter()
         .flat_map(|g| &g.sessions)
@@ -79,23 +83,41 @@ fn run_osascript(script: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn start_poll_timer(app: AppHandle, hook_state: HookState) {
+fn prune_cache(cache: &EnrichmentCache, groups: &[ProjectGroup]) {
+    let active_ids: Vec<String> = groups
+        .iter()
+        .flat_map(|g| &g.sessions)
+        .map(|s| s.session_id.clone())
+        .collect();
+    enrichment::prune_cache(cache, &active_ids);
+}
+
+fn start_poll_timer(app: AppHandle, hook_state: HookState, cache: EnrichmentCache) {
     tauri::async_runtime::spawn(async move {
         loop {
-            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-            let groups = scan_sessions(&hook_state);
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+            let groups = scan_sessions(&hook_state, &cache);
+            prune_cache(&cache, &groups);
             let _ = app.emit("sessions-changed", &groups);
         }
+    });
+}
+
+fn start_hook_server(hook_state: HookState) {
+    tauri::async_runtime::spawn(async move {
+        hooks::start_hook_server(hook_state).await;
     });
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let hook_state = hooks::new_hook_state();
+    let cache = enrichment::new_enrichment_cache();
 
     tauri::Builder::default()
         .manage(AppState {
             hook_state: hook_state.clone(),
+            cache: cache.clone(),
         })
         .setup(move |app| {
             if cfg!(debug_assertions) {
@@ -107,17 +129,11 @@ pub fn run() {
             }
 
             start_hook_server(hook_state.clone());
-            start_poll_timer(app.handle().clone(), hook_state);
+            start_poll_timer(app.handle().clone(), hook_state, cache);
 
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![get_session_groups, focus_session])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
-}
-
-fn start_hook_server(hook_state: HookState) {
-    tauri::async_runtime::spawn(async move {
-        hooks::start_hook_server(hook_state).await;
-    });
 }

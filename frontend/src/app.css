@@ -1,45 +1,136 @@
 @import 'tailwindcss';
 
-@theme {
-	--color-void: #06080c;
-	--color-bg: #0a0d12;
-	--color-surface: #0d1117;
-	--color-surface-hover: #151d2a;
-	--color-border: #1a2332;
-	--color-border-bright: #243044;
+/* ══════════════════════════════════════════
+   THEME: NIGHTFALL (dark futuristic)
+   ══════════════════════════════════════════ */
+[data-theme="nightfall"] {
+	--color-void: #05080d;
+	--color-bg: #0b0f16;
+	--color-surface: #111722;
+	--color-surface-hover: #19202e;
+	--color-border: #1f2937;
+	--color-border-bright: #2d3a4d;
 
-	--color-text-primary: #c4cdd9;
-	--color-text-secondary: #6a7b8f;
-	--color-text-dim: #3a4a5c;
-	--color-text-ghost: #1e2b3a;
+	--color-text-primary: #d4dbe6;
+	--color-text-secondary: #8a9bb2;
+	--color-text-dim: #5a6e85;
+	--color-text-ghost: #374457;
 
-	--color-status-active: #00cc88;
-	--color-status-active-dim: #00cc8815;
-	--color-status-waiting: #ff9f43;
-	--color-status-waiting-dim: #ff9f4315;
-	--color-status-idle: #4a6fa5;
-	--color-status-idle-dim: #4a6fa510;
-	--color-status-unknown: #3a4a5c;
-	--color-status-unknown-dim: #3a4a5c10;
+	--color-status-active: #34d399;
+	--color-status-active-dim: #34d39918;
+	--color-status-waiting: #fbbf24;
+	--color-status-waiting-dim: #fbbf2418;
+	--color-status-idle: #60a5fa;
+	--color-status-idle-dim: #60a5fa12;
+	--color-status-unknown: #5a6e85;
+	--color-status-unknown-dim: #5a6e8512;
 
-	--color-accent: #00b4d8;
-	--color-urgent: #ff4757;
-	--color-urgent-dim: #ff475718;
+	--color-accent: #38bdf8;
+	--color-urgent: #f87171;
+	--color-urgent-dim: #f8717118;
 
-	--font-display: 'Orbitron', sans-serif;
-	--font-mono: 'Share Tech Mono', 'SF Mono', monospace;
+	--font-display: 'Chakra Petch', sans-serif;
+	--font-body: 'IBM Plex Mono', 'SF Mono', monospace;
+	--font-data: 'Source Code Pro', monospace;
+
+	--radius: 2px;
+	--border-style: solid;
+	--row-border-left-width: 2px;
+	--scanline-opacity: 0.02;
+	--flicker: flicker 10s ease-in-out infinite;
 }
 
-/* ── Base ── */
+/* ══════════════════════════════════════════
+   THEME: FIELDCOM (khaki/military)
+   ══════════════════════════════════════════ */
+[data-theme="fieldcom"] {
+	--color-void: #1a1c17;
+	--color-bg: #22251e;
+	--color-surface: #2a2e25;
+	--color-surface-hover: #33382c;
+	--color-border: #3f4536;
+	--color-border-bright: #525944;
+
+	--color-text-primary: #d4d0c0;
+	--color-text-secondary: #a8a38e;
+	--color-text-dim: #7a7660;
+	--color-text-ghost: #555040;
+
+	--color-status-active: #8fc43e;
+	--color-status-active-dim: #8fc43e18;
+	--color-status-waiting: #dba63a;
+	--color-status-waiting-dim: #dba63a18;
+	--color-status-idle: #7a9a6f;
+	--color-status-idle-dim: #7a9a6f12;
+	--color-status-unknown: #7a7660;
+	--color-status-unknown-dim: #7a766012;
+
+	--color-accent: #8fc43e;
+	--color-urgent: #c45b3e;
+	--color-urgent-dim: #c45b3e18;
+
+	--font-display: 'Chakra Petch', sans-serif;
+	--font-body: 'DM Mono', 'SF Mono', monospace;
+	--font-data: 'Source Code Pro', monospace;
+
+	--radius: 0px;
+	--border-style: solid;
+	--row-border-left-width: 3px;
+	--scanline-opacity: 0.04;
+	--flicker: none;
+}
+
+/* ══════════════════════════════════════════
+   THEME: WARMDESK (cream/mahogany)
+   ══════════════════════════════════════════ */
+[data-theme="warmdesk"] {
+	--color-void: #f5f0e8;
+	--color-bg: #faf6ef;
+	--color-surface: #ffffff;
+	--color-surface-hover: #f0ebe2;
+	--color-border: #e0d8ca;
+	--color-border-bright: #c9bfad;
+
+	--color-text-primary: #2c2418;
+	--color-text-secondary: #5c4f3c;
+	--color-text-dim: #8a7d6a;
+	--color-text-ghost: #b5a998;
+
+	--color-status-active: #2d8a4e;
+	--color-status-active-dim: #2d8a4e12;
+	--color-status-waiting: #b87514;
+	--color-status-waiting-dim: #b8751412;
+	--color-status-idle: #4a6fa5;
+	--color-status-idle-dim: #4a6fa510;
+	--color-status-unknown: #8a7d6a;
+	--color-status-unknown-dim: #8a7d6a10;
+
+	--color-accent: #6b3a2a;
+	--color-urgent: #a83232;
+	--color-urgent-dim: #a8323210;
+
+	--font-display: 'Bitter', serif;
+	--font-body: 'IBM Plex Mono', 'SF Mono', monospace;
+	--font-data: 'Source Code Pro', monospace;
+
+	--radius: 4px;
+	--border-style: solid;
+	--row-border-left-width: 3px;
+	--scanline-opacity: 0;
+	--flicker: none;
+}
+
+/* ══════════════════════════════════════════
+   BASE STYLES
+   ══════════════════════════════════════════ */
 body {
 	background-color: var(--color-void);
 	color: var(--color-text-primary);
-	font-family: var(--font-mono);
+	font-family: var(--font-body);
 	-webkit-font-smoothing: antialiased;
 	overflow: hidden;
 }
 
-/* ── Scanline overlay ── */
 body::after {
 	content: '';
 	position: fixed;
@@ -50,21 +141,16 @@ body::after {
 		0deg,
 		transparent,
 		transparent 2px,
-		rgba(0, 0, 0, 0.03) 2px,
-		rgba(0, 0, 0, 0.03) 4px
+		rgba(0, 0, 0, var(--scanline-opacity)) 2px,
+		rgba(0, 0, 0, var(--scanline-opacity)) 4px
 	);
 }
 
-/* ── Scrollbar ── */
-::-webkit-scrollbar {
-	width: 4px;
-}
-::-webkit-scrollbar-track {
-	background: transparent;
-}
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
 	background: var(--color-border);
-	border-radius: 0;
+	border-radius: var(--radius);
 }
 ::-webkit-scrollbar-thumb:hover {
 	background: var(--color-border-bright);
@@ -78,14 +164,14 @@ body::after {
 
 @keyframes flicker {
 	0%, 100% { opacity: 1; }
-	50% { opacity: 0.97; }
+	50% { opacity: 0.98; }
 	92% { opacity: 1; }
-	93% { opacity: 0.9; }
+	93% { opacity: 0.92; }
 	94% { opacity: 1; }
 }
 
 @keyframes urgent-beacon {
-	0%, 100% { opacity: 0.6; }
+	0%, 100% { opacity: 0.7; }
 	50% { opacity: 1; }
 }
 
@@ -95,6 +181,6 @@ body::after {
 }
 
 @keyframes boot-in {
-	0% { opacity: 0; transform: translateY(4px); }
+	0% { opacity: 0; transform: translateY(3px); }
 	100% { opacity: 1; transform: translateY(0); }
 }

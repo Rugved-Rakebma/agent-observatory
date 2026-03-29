@@ -25,12 +25,22 @@
 		sessions: Session[];
 	}
 
+	const THEMES = ['nightfall', 'fieldcom', 'warmdesk'] as const;
+	type Theme = typeof THEMES[number];
+
 	let groups: ProjectGroup[] = $state([]);
 	let lastScan = $state('');
 	let clock = $state('');
 	let booted = $state(false);
+	let theme: Theme = $state((localStorage.getItem('observatory-theme') as Theme) || 'nightfall');
+
+	$effect(() => {
+		document.documentElement.setAttribute('data-theme', theme);
+		localStorage.setItem('observatory-theme', theme);
+	});
 
 	onMount(async () => {
+		document.documentElement.setAttribute('data-theme', theme);
 		setTimeout(() => { booted = true; }, 100);
 
 		const tick = () => {
@@ -53,6 +63,11 @@
 
 		return () => clearInterval(clockInterval);
 	});
+
+	function cycleTheme() {
+		const idx = THEMES.indexOf(theme);
+		theme = THEMES[(idx + 1) % THEMES.length];
+	}
 
 	function statusMeta(status: string) {
 		switch (status) {
@@ -119,9 +134,12 @@
 		<div class="top-bar-left">
 			<span class="observatory-title">OBSERVATORY</span>
 			<span class="top-bar-divider">│</span>
-			<span class="top-bar-meta">SYS.MONITOR v0.3</span>
+			<span class="top-bar-meta">v0.3</span>
 		</div>
 		<div class="top-bar-right">
+			<button class="theme-btn" onclick={cycleTheme} title="Switch theme">
+				{theme === 'nightfall' ? '◑' : theme === 'fieldcom' ? '◐' : '○'}
+			</button>
 			<span class="top-bar-meta">{clock}</span>
 		</div>
 	</header>
@@ -183,7 +201,6 @@
 								</div>
 
 								<div class="session-core">
-									<!-- Row 1: Identity -->
 									<div class="session-id-row">
 										<span class="session-slug">{sessionLabel(session)}</span>
 										{#if session.activity}
@@ -191,7 +208,6 @@
 										{/if}
 									</div>
 
-									<!-- Row 2: Metadata -->
 									<div class="session-meta-row">
 										{#if session.model}
 											<span class="session-model">{session.model}</span>
@@ -203,12 +219,11 @@
 											<span class="context-label" style="color: {contextColor(pct)};">{pct}%</span>
 										{/if}
 										{#if session.git_branch}
-											<span class="session-branch">⌥ {session.git_branch}</span>
+											<span class="session-branch">{session.git_branch}</span>
 										{/if}
 										<span class="session-source-small">{session.source}</span>
 									</div>
 
-									<!-- Row 3: Last message -->
 									{#if session.last_message}
 										<p class="session-message">{session.last_message}</p>
 									{/if}
@@ -216,7 +231,7 @@
 
 								<div class="session-status-tag" style="
 									color: {meta.color};
-									border-color: {meta.color}30;
+									border-color: {meta.color}40;
 									background: {meta.dim};
 								">
 									{meta.label}
@@ -235,8 +250,7 @@
 
 	<footer class="bottom-bar">
 		<span class="bottom-meta">◈ CLICK TO FOCUS</span>
-		<span class="bottom-meta">POLL: 10s</span>
-		<span class="bottom-meta">macOS KERN_PROCARGS2</span>
+		<span class="bottom-meta">POLL 10s</span>
 	</footer>
 </div>
 
@@ -251,11 +265,11 @@
 		position: relative;
 		overflow: hidden;
 		opacity: 0;
-		transition: opacity 0.6s ease;
+		transition: opacity 0.4s ease, background-color 0.3s ease, color 0.3s ease;
 	}
 	.observatory.booted {
 		opacity: 1;
-		animation: flicker 8s ease-in-out infinite;
+		animation: var(--flicker);
 	}
 
 	.observatory::before {
@@ -263,20 +277,18 @@
 		position: absolute;
 		inset: 0;
 		pointer-events: none;
-		background: radial-gradient(ellipse at 50% 0%, transparent 50%, var(--color-void) 100%);
+		background: radial-gradient(ellipse at 50% 0%, transparent 60%, var(--color-void) 100%);
 		z-index: 1;
 	}
 
 	.scan-beam {
 		position: absolute;
-		top: 0;
-		left: 0;
-		right: 0;
+		top: 0; left: 0; right: 0;
 		height: 1px;
 		background: linear-gradient(90deg, transparent 0%, var(--color-accent) 50%, transparent 100%);
-		opacity: 0.08;
+		opacity: 0.06;
 		z-index: 10;
-		animation: scan 12s linear infinite;
+		animation: scan 14s linear infinite;
 		pointer-events: none;
 	}
 
@@ -285,20 +297,19 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		padding: 12px 20px;
-		border-bottom: 1px solid var(--color-border);
+		padding: 10px 20px;
+		border-bottom: 1px var(--border-style) var(--color-border);
 		background: var(--color-surface);
 		position: relative;
 		z-index: 2;
+		transition: background-color 0.3s ease;
 	}
 	.top-bar::after {
 		content: '';
 		position: absolute;
-		bottom: -1px;
-		left: 0;
-		right: 0;
+		bottom: -1px; left: 0; right: 0;
 		height: 1px;
-		background: linear-gradient(90deg, transparent, var(--color-accent)20, transparent);
+		background: linear-gradient(90deg, transparent, var(--color-accent)15, transparent);
 	}
 	.top-bar-left, .top-bar-right {
 		display: flex;
@@ -307,28 +318,49 @@
 	}
 	.observatory-title {
 		font-family: var(--font-display);
-		font-size: 11px;
+		font-size: 12px;
 		font-weight: 600;
-		letter-spacing: 0.25em;
+		letter-spacing: 0.2em;
 		color: var(--color-accent);
 	}
 	.top-bar-divider {
 		color: var(--color-text-ghost);
-		font-size: 11px;
+		font-size: 12px;
 	}
 	.top-bar-meta {
+		font-family: var(--font-data);
 		font-size: 11px;
 		color: var(--color-text-dim);
-		letter-spacing: 0.05em;
+		letter-spacing: 0.03em;
+	}
+	.theme-btn {
+		background: none;
+		border: 1px var(--border-style) var(--color-border);
+		color: var(--color-text-secondary);
+		font-size: 14px;
+		width: 28px;
+		height: 28px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		cursor: pointer;
+		border-radius: var(--radius);
+		transition: all 0.15s ease;
+	}
+	.theme-btn:hover {
+		border-color: var(--color-accent);
+		color: var(--color-accent);
+		background: var(--color-surface-hover);
 	}
 
 	/* ── Status Strip ── */
 	.status-strip {
 		display: flex;
-		border-bottom: 1px solid var(--color-border);
+		border-bottom: 1px var(--border-style) var(--color-border);
 		background: var(--color-void);
 		position: relative;
 		z-index: 2;
+		transition: background-color 0.3s ease;
 	}
 	.status-strip-cell {
 		flex: 1;
@@ -336,8 +368,8 @@
 		align-items: center;
 		justify-content: center;
 		gap: 8px;
-		padding: 8px 12px;
-		border-right: 1px solid var(--color-border);
+		padding: 7px 12px;
+		border-right: 1px var(--border-style) var(--color-border);
 	}
 	.status-strip-cell:last-child { border-right: none; }
 	.strip-label {
@@ -347,6 +379,7 @@
 		font-family: var(--font-display);
 	}
 	.strip-value {
+		font-family: var(--font-data);
 		font-size: 13px;
 		color: var(--color-text-secondary);
 		font-variant-numeric: tabular-nums;
@@ -360,10 +393,10 @@
 	.main-area {
 		flex: 1;
 		overflow-y: auto;
-		padding: 16px 20px;
+		padding: 14px 18px;
 		display: flex;
 		flex-direction: column;
-		gap: 20px;
+		gap: 18px;
 		position: relative;
 		z-index: 2;
 	}
@@ -378,18 +411,19 @@
 		gap: 8px;
 	}
 	.empty-glyph {
-		font-size: 32px;
+		font-size: 28px;
 		color: var(--color-text-ghost);
 		animation: blink 3s ease-in-out infinite;
 	}
 	.empty-text {
 		font-family: var(--font-display);
-		font-size: 11px;
-		letter-spacing: 0.2em;
+		font-size: 12px;
+		letter-spacing: 0.15em;
 		color: var(--color-text-dim);
 	}
 	.empty-sub {
-		font-size: 10px;
+		font-family: var(--font-data);
+		font-size: 11px;
 		color: var(--color-text-ghost);
 	}
 
@@ -401,7 +435,7 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		padding: 0 4px 8px;
+		padding: 0 2px 6px;
 	}
 	.project-header-left {
 		display: flex;
@@ -409,45 +443,48 @@
 		gap: 8px;
 	}
 	.project-marker {
-		font-size: 6px;
+		font-size: 7px;
 		color: var(--color-accent);
 	}
 	.project-name {
 		font-family: var(--font-display);
-		font-size: 10px;
-		font-weight: 500;
-		letter-spacing: 0.2em;
+		font-size: 11px;
+		font-weight: 600;
+		letter-spacing: 0.15em;
 		color: var(--color-text-secondary);
 	}
 	.project-count {
-		font-size: 9px;
-		color: var(--color-text-ghost);
-		border: 1px solid var(--color-border);
-		padding: 1px 5px;
-		line-height: 1.2;
+		font-family: var(--font-data);
+		font-size: 10px;
+		color: var(--color-text-dim);
+		border: 1px var(--border-style) var(--color-border);
+		padding: 1px 6px;
+		line-height: 1.3;
+		border-radius: var(--radius);
 	}
 	.project-path {
+		font-family: var(--font-data);
 		font-size: 10px;
 		color: var(--color-text-ghost);
-		letter-spacing: 0.02em;
 	}
 
 	/* ── Session List ── */
 	.session-list {
 		display: flex;
 		flex-direction: column;
-		gap: 2px;
+		gap: 3px;
 	}
 
 	/* ── Session Row ── */
 	.session-row {
 		display: flex;
 		align-items: flex-start;
-		gap: 12px;
-		padding: 10px 12px;
+		gap: 10px;
+		padding: 10px 14px;
 		background: var(--color-surface);
-		border: 1px solid var(--color-border);
-		border-left: 2px solid var(--row-color, var(--color-text-ghost));
+		border: 1px var(--border-style) var(--color-border);
+		border-left: var(--row-border-left-width) var(--border-style) var(--row-color, var(--color-text-ghost));
+		border-radius: var(--radius);
 		cursor: pointer;
 		text-align: left;
 		width: 100%;
@@ -466,28 +503,29 @@
 
 	.session-waiting {
 		background: var(--color-urgent-dim);
-		border-color: var(--color-urgent)30;
+		border-color: var(--color-border-bright);
 	}
 	.session-waiting::after {
 		content: '';
 		position: absolute;
 		inset: 0;
 		pointer-events: none;
-		box-shadow: inset 0 0 20px var(--color-urgent-dim);
+		border-radius: var(--radius);
+		box-shadow: inset 0 0 16px var(--color-urgent-dim);
 		animation: urgent-beacon 2s ease-in-out infinite;
 	}
 
 	/* ── Session Parts ── */
 	.session-indicator {
-		width: 20px;
+		width: 18px;
 		display: flex;
 		align-items: center;
 		justify-content: center;
 		flex-shrink: 0;
-		padding-top: 2px;
+		padding-top: 1px;
 	}
 	.indicator-glyph {
-		font-size: 14px;
+		font-size: 13px;
 		line-height: 1;
 	}
 
@@ -496,92 +534,103 @@
 		min-width: 0;
 		display: flex;
 		flex-direction: column;
-		gap: 3px;
+		gap: 4px;
 	}
 
-	/* Row 1: Identity */
 	.session-id-row {
 		display: flex;
 		align-items: baseline;
-		gap: 6px;
+		gap: 8px;
 	}
 	.session-slug {
-		font-size: 12px;
-		color: var(--color-text-secondary);
+		font-family: var(--font-body);
+		font-size: 13px;
+		font-weight: 500;
+		color: var(--color-text-primary);
 		transition: color 0.12s ease;
 	}
 	.session-activity-inline {
-		font-size: 10px;
+		font-family: var(--font-data);
+		font-size: 11px;
 		color: var(--color-text-dim);
 	}
 
-	/* Row 2: Metadata */
 	.session-meta-row {
 		display: flex;
 		align-items: center;
-		gap: 8px;
-		font-size: 10px;
+		gap: 10px;
+		font-size: 11px;
 	}
 	.session-model {
-		color: var(--color-text-dim);
-		letter-spacing: 0.08em;
 		font-family: var(--font-display);
-		font-size: 8px;
+		font-size: 9px;
+		font-weight: 500;
+		letter-spacing: 0.1em;
+		color: var(--color-text-secondary);
+		text-transform: uppercase;
 	}
 	.context-bar-wrap {
-		width: 40px;
-		height: 4px;
+		width: 50px;
+		height: 5px;
 		background: var(--color-border);
 		overflow: hidden;
 		flex-shrink: 0;
+		border-radius: 1px;
 	}
 	.context-bar-fill {
 		height: 100%;
 		transition: width 0.3s ease;
+		border-radius: 1px;
 	}
 	.context-label {
-		font-size: 9px;
+		font-family: var(--font-data);
+		font-size: 10px;
 		font-variant-numeric: tabular-nums;
 	}
 	.session-branch {
-		color: var(--color-text-dim);
+		font-family: var(--font-data);
 		font-size: 10px;
+		color: var(--color-text-dim);
 	}
 	.session-source-small {
-		font-size: 9px;
+		font-family: var(--font-data);
+		font-size: 10px;
 		color: var(--color-text-ghost);
 		margin-left: auto;
 	}
 
-	/* Row 3: Last message */
 	.session-message {
-		font-size: 10px;
-		color: var(--color-text-ghost);
+		font-family: var(--font-body);
+		font-size: 11px;
+		color: var(--color-text-dim);
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 		margin: 0;
+		line-height: 1.4;
 	}
 
 	.session-status-tag {
 		font-family: var(--font-display);
-		font-size: 8px;
+		font-size: 9px;
 		font-weight: 500;
-		letter-spacing: 0.18em;
+		letter-spacing: 0.12em;
 		padding: 3px 8px;
-		border: 1px solid;
+		border: 1px var(--border-style);
+		border-radius: var(--radius);
 		flex-shrink: 0;
-		margin-top: 2px;
+		margin-top: 1px;
 	}
 
 	.session-elapsed {
-		font-size: 11px;
-		color: var(--color-text-dim);
+		font-family: var(--font-data);
+		font-size: 12px;
+		color: var(--color-text-secondary);
 		font-variant-numeric: tabular-nums;
-		width: 60px;
+		width: 64px;
 		text-align: right;
 		flex-shrink: 0;
-		margin-top: 2px;
+		margin-top: 1px;
 	}
 
 	/* ── Bottom Bar ── */
@@ -589,16 +638,18 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		gap: 24px;
-		padding: 6px 20px;
-		border-top: 1px solid var(--color-border);
+		gap: 20px;
+		padding: 5px 20px;
+		border-top: 1px var(--border-style) var(--color-border);
 		background: var(--color-void);
 		position: relative;
 		z-index: 2;
+		transition: background-color 0.3s ease;
 	}
 	.bottom-meta {
+		font-family: var(--font-data);
 		font-size: 9px;
-		letter-spacing: 0.1em;
+		letter-spacing: 0.08em;
 		color: var(--color-text-ghost);
 	}
 </style>

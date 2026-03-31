@@ -8,12 +8,15 @@ pub struct HookEvent {
     pub session_id: Option<String>,
     pub hook_event_name: Option<String>,
     pub notification_type: Option<String>,
+    pub tool_name: Option<String>,
+    pub tool_input: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone)]
 pub struct HookStatus {
     pub status: String,
     pub activity: Option<String>,
+    pub tool_detail: Option<String>,
     pub timestamp: std::time::Instant,
 }
 
@@ -56,45 +59,63 @@ async fn handle_hook(
     let hook_name = event.hook_event_name.as_deref().unwrap_or("");
 
     let hook_status = match hook_name {
-        "PermissionRequest" => HookStatus {
-            status: "WaitingInput".to_string(),
-            activity: Some("Permission requested".to_string()),
-            timestamp: std::time::Instant::now(),
-        },
+        "PermissionRequest" => {
+            let detail = extract_tool_detail(&event);
+            let activity = detail.clone().unwrap_or_else(|| "Permission requested".into());
+
+            send_notification("Agent needs input", &activity);
+
+            HookStatus {
+                status: "WaitingInput".into(),
+                activity: Some(activity),
+                tool_detail: detail,
+                timestamp: std::time::Instant::now(),
+            }
+        }
         "Notification" => {
             let notif_type = event.notification_type.as_deref().unwrap_or("");
             match notif_type {
-                "permission_prompt" => HookStatus {
-                    status: "WaitingInput".to_string(),
-                    activity: Some("Permission prompt".to_string()),
-                    timestamp: std::time::Instant::now(),
-                },
+                "permission_prompt" => {
+                    send_notification("Agent needs input", "Permission prompt");
+
+                    HookStatus {
+                        status: "WaitingInput".into(),
+                        activity: Some("Permission prompt".into()),
+                        tool_detail: None,
+                        timestamp: std::time::Instant::now(),
+                    }
+                }
                 "idle_prompt" => HookStatus {
-                    status: "Idle".to_string(),
-                    activity: Some("Waiting for prompt".to_string()),
+                    status: "Idle".into(),
+                    activity: Some("Waiting for prompt".into()),
+                    tool_detail: None,
                     timestamp: std::time::Instant::now(),
                 },
                 _ => return StatusCode::OK,
             }
         }
         "UserPromptSubmit" => HookStatus {
-            status: "Working".to_string(),
-            activity: Some("Processing prompt".to_string()),
+            status: "Working".into(),
+            activity: Some("Processing prompt".into()),
+            tool_detail: None,
             timestamp: std::time::Instant::now(),
         },
         "Stop" => HookStatus {
-            status: "Idle".to_string(),
-            activity: Some("Finished responding".to_string()),
+            status: "Idle".into(),
+            activity: Some("Finished responding".into()),
+            tool_detail: None,
             timestamp: std::time::Instant::now(),
         },
         "PostToolUseFailure" => HookStatus {
-            status: "Working".to_string(),
-            activity: Some("Tool failed — retrying".to_string()),
+            status: "Working".into(),
+            activity: Some("Tool failed — retrying".into()),
+            tool_detail: None,
             timestamp: std::time::Instant::now(),
         },
         "SessionStart" => HookStatus {
-            status: "Idle".to_string(),
-            activity: Some("Session started".to_string()),
+            status: "Idle".into(),
+            activity: Some("Session started".into()),
+            tool_detail: None,
             timestamp: std::time::Instant::now(),
         },
         _ => return StatusCode::OK,
@@ -120,4 +141,39 @@ pub fn get_hook_status(state: &HookState, session_id: &str) -> Option<HookStatus
     } else {
         Some(status.clone())
     }
+}
+
+fn extract_tool_detail(event: &HookEvent) -> Option<String> {
+    let name = event.tool_name.as_deref()?;
+    let input = event.tool_input.as_ref();
+
+    let target = input.and_then(|v| {
+        match name {
+            "Bash" => v.get("command").and_then(|c| c.as_str()),
+            "Edit" | "Write" | "Read" => v.get("file_path").and_then(|f| f.as_str()),
+            "Grep" | "Glob" => v.get("pattern").and_then(|p| p.as_str()),
+            "WebFetch" => v.get("url").and_then(|u| u.as_str()),
+            "Agent" => v.get("subagent_type").and_then(|s| s.as_str()),
+            _ => None,
+        }
+    });
+
+    match target {
+        Some(t) => {
+            let truncated = if t.len() > 60 { &t[..60] } else { t };
+            Some(format!("{}: {}", name, truncated))
+        }
+        None => Some(name.to_string()),
+    }
+}
+
+fn send_notification(title: &str, body: &str) {
+    let script = format!(
+        r#"display notification "{}" with title "{}""#,
+        body.replace('"', "'"),
+        title.replace('"', "'"),
+    );
+    let _ = std::process::Command::new("osascript")
+        .args(["-e", &script])
+        .output();
 }

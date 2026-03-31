@@ -49,7 +49,7 @@ frontend/
 - `proc_pidpath` is unreliable on macOS — `is_claude_process` trusts session file existence as fallback
 - Hook events: `SessionStart`, `Stop`, `PermissionRequest`, `UserPromptSubmit`, `Notification`, `PostToolUseFailure`
 - Status inference from JSONL: `stop_reason: "end_turn"` = Idle, `"tool_use"` + stale mtime = WaitingInput
-- Context usage = `input_tokens` from last assistant message's `usage` block (cache reads are a subset, not additive)
+- Context usage = `input_tokens + cache_creation_input_tokens + cache_read_input_tokens` from last assistant message's `usage` block (input_tokens alone is just the non-cached sliver)
 - Context max: 1M for opus/sonnet, 200k for haiku
 - 10MB line size guard on JSONL parsing (OOM protection)
 - Graceful degradation: all enrichment fields are `Option<T>`, cards fall back to status-only if parsing fails

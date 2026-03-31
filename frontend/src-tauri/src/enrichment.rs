@@ -121,6 +121,8 @@ struct MessageInfo {
 #[derive(Debug, Deserialize)]
 struct UsageInfo {
     input_tokens: Option<u64>,
+    cache_creation_input_tokens: Option<u64>,
+    cache_read_input_tokens: Option<u64>,
 }
 
 // ── Parsing ──
@@ -173,7 +175,13 @@ fn parse_jsonl_tail(tail: &str, mtime_age: f64) -> EnrichedData {
                 // Context usage from usage block
                 if result.context_used.is_none() {
                     if let Some(ref usage) = msg.usage {
-                        result.context_used = usage.input_tokens;
+                        let input = usage.input_tokens.unwrap_or(0);
+                        let cache_create = usage.cache_creation_input_tokens.unwrap_or(0);
+                        let cache_read = usage.cache_read_input_tokens.unwrap_or(0);
+                        let total = input + cache_create + cache_read;
+                        if total > 0 {
+                            result.context_used = Some(total);
+                        }
                     }
                 }
 

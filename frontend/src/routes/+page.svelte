@@ -17,6 +17,7 @@
 		context_max: number | null;
 		git_branch: string | null;
 		last_message: string | null;
+		tool_detail: string | null;
 	}
 
 	interface ProjectGroup {
@@ -203,7 +204,9 @@
 								<div class="session-core">
 									<div class="session-id-row">
 										<span class="session-slug">{sessionLabel(session)}</span>
-										{#if session.activity}
+										{#if session.tool_detail}
+											<span class="session-activity-inline">— {session.tool_detail}</span>
+										{:else if session.activity}
 											<span class="session-activity-inline">— {session.activity}</span>
 										{/if}
 									</div>

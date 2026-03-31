@@ -34,6 +34,7 @@ pub struct Session {
     pub context_max: Option<u64>,
     pub git_branch: Option<String>,
     pub last_message: Option<String>,
+    pub tool_detail: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -93,10 +94,10 @@ fn read_session_file(path: &Path, hook_state: &HookState, cache: &EnrichmentCach
     let enriched = enrichment::enrich_session(&file.session_id, &file.cwd, cache);
 
     // Hook status takes priority for status/activity
-    let (status, activity) = if let Some(hook) = hooks::get_hook_status(hook_state, &file.session_id) {
-        (hook.status, hook.activity)
+    let (status, activity, tool_detail) = if let Some(hook) = hooks::get_hook_status(hook_state, &file.session_id) {
+        (hook.status, hook.activity, hook.tool_detail)
     } else {
-        (enriched.status, enriched.activity)
+        (enriched.status, enriched.activity, None)
     };
 
     Some(Session {
@@ -113,6 +114,7 @@ fn read_session_file(path: &Path, hook_state: &HookState, cache: &EnrichmentCach
         context_max: enriched.context_max,
         git_branch: enriched.git_branch,
         last_message: enriched.last_message,
+        tool_detail,
     })
 }
 

@@ -247,13 +247,16 @@ fn extract_last_message(msg: &MessageInfo) -> Option<String> {
 }
 
 fn truncate_at_word(s: &str, max: usize) -> String {
-    // Normalize whitespace first
     let normalized: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
     if normalized.len() <= max {
         return normalized;
     }
-    // Find last space before max
-    let truncated = &normalized[..max];
+    // Find a valid char boundary at or before max
+    let mut end = max;
+    while end > 0 && !normalized.is_char_boundary(end) {
+        end -= 1;
+    }
+    let truncated = &normalized[..end];
     match truncated.rfind(' ') {
         Some(pos) => format!("{}...", &truncated[..pos]),
         None => format!("{}...", truncated),
@@ -366,7 +369,7 @@ fn context_max_for_model(raw: &str) -> u64 {
     }
 }
 
-fn find_jsonl_path(session_id: &str, raw_cwd: &str) -> Option<PathBuf> {
+pub(crate) fn find_jsonl_path(session_id: &str, raw_cwd: &str) -> Option<PathBuf> {
     let home = dirs::home_dir()?;
     let encoded = raw_cwd.replace('/', "-").replace(' ', "-");
     let path = home

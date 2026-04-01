@@ -1,3 +1,4 @@
+mod conversation;
 mod enrichment;
 mod hooks;
 mod scanner;
@@ -17,6 +18,12 @@ fn get_session_groups(state: tauri::State<AppState>) -> Vec<ProjectGroup> {
     let groups = scan_sessions(&state.hook_state, &state.cache);
     prune_cache(&state.cache, &groups);
     groups
+}
+
+#[tauri::command]
+fn get_conversation(session_id: String, cwd: String) -> Result<conversation::ConversationData, String> {
+    conversation::parse_conversation(&session_id, &cwd)
+        .ok_or_else(|| "Could not load conversation".to_string())
 }
 
 #[tauri::command]
@@ -133,7 +140,7 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_session_groups, focus_session])
+        .invoke_handler(tauri::generate_handler![get_session_groups, get_conversation, focus_session])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

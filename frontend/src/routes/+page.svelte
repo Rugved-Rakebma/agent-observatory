@@ -79,9 +79,26 @@
 			console.error('Failed to scan sessions:', e);
 		}
 
-		await listen<ProjectGroup[]>('sessions-changed', (event) => {
+		await listen<ProjectGroup[]>('sessions-changed', async (event) => {
 			groups = event.payload;
 			lastScan = new Date().toLocaleTimeString('en-US', { hour12: false });
+
+			// Auto-refresh conversation if one is open
+			if (viewingSession && !conversationLoading) {
+				try {
+					const data = await invoke<ConversationData>('get_conversation', {
+						sessionId: viewingSession.session_id,
+						cwd: viewingSession.cwd
+					});
+					const hadNew = !conversationData || data.totalEntries !== conversationData.totalEntries;
+					conversationData = data;
+					if (hadNew) {
+						await tick();
+						const el = document.querySelector('.conversation-messages');
+						if (el) el.scrollTop = el.scrollHeight;
+					}
+				} catch {}
+			}
 		});
 
 		return () => clearInterval(clockInterval);

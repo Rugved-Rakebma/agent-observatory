@@ -110,9 +110,9 @@ fn start_poll_timer(app: AppHandle, hook_state: HookState, cache: EnrichmentCach
     });
 }
 
-fn start_hook_server(hook_state: HookState) {
+fn start_hook_server(hook_state: HookState, cache: EnrichmentCache, app_handle: AppHandle) {
     tauri::async_runtime::spawn(async move {
-        hooks::start_hook_server(hook_state).await;
+        hooks::start_hook_server(hook_state, cache, app_handle).await;
     });
 }
 
@@ -135,7 +135,7 @@ pub fn run() {
                 )?;
             }
 
-            start_hook_server(hook_state.clone());
+            start_hook_server(hook_state.clone(), cache.clone(), app.handle().clone());
             start_poll_timer(app.handle().clone(), hook_state, cache);
 
             Ok(())

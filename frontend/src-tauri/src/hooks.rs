@@ -2,6 +2,10 @@ use axum::{extract::State as AxumState, http::StatusCode, routing::{get, post}, 
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use tauri::{AppHandle, Emitter};
+
+use crate::enrichment::EnrichmentCache;
+use crate::scanner::{scan_sessions, ProjectGroup};
 
 #[derive(Debug, Deserialize)]
 pub struct HookEvent {
@@ -26,7 +30,15 @@ pub fn new_hook_state() -> HookState {
     Arc::new(Mutex::new(HashMap::new()))
 }
 
-pub async fn start_hook_server(state: HookState) {
+#[derive(Clone)]
+struct HookServerState {
+    hook_state: HookState,
+    cache: EnrichmentCache,
+    app_handle: AppHandle,
+}
+
+pub async fn start_hook_server(hook_state: HookState, cache: EnrichmentCache, app_handle: AppHandle) {
+    let state = HookServerState { hook_state, cache, app_handle };
     let app = Router::new()
         .route("/hook", post(handle_hook))
         .route("/health", get(health))
@@ -48,7 +60,7 @@ pub async fn start_hook_server(state: HookState) {
 }
 
 async fn handle_hook(
-    AxumState(state): AxumState<HookState>,
+    AxumState(state): AxumState<HookServerState>,
     Json(event): Json<HookEvent>,
 ) -> StatusCode {
     let session_id = match &event.session_id {
@@ -121,9 +133,13 @@ async fn handle_hook(
         _ => return StatusCode::OK,
     };
 
-    if let Ok(mut map) = state.lock() {
+    if let Ok(mut map) = state.hook_state.lock() {
         map.insert(session_id, hook_status);
     }
+
+    // Immediate refresh: re-scan and push to frontend
+    let groups = scan_sessions(&state.hook_state, &state.cache);
+    let _ = state.app_handle.emit("sessions-changed", &groups);
 
     StatusCode::OK
 }

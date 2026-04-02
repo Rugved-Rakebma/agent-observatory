@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
 
 use crate::enrichment::EnrichmentCache;
-use crate::scanner::{scan_sessions, ProjectGroup};
+use crate::scanner::scan_sessions;
 
 #[derive(Debug, Deserialize)]
 pub struct HookEvent {
@@ -69,6 +69,12 @@ async fn handle_hook(
     };
 
     let hook_name = event.hook_event_name.as_deref().unwrap_or("");
+
+    log::info!(
+        "Hook received: event={} session={}",
+        hook_name,
+        &session_id[..8.min(session_id.len())]
+    );
 
     let hook_status = match hook_name {
         "PermissionRequest" => {
@@ -152,6 +158,12 @@ pub fn get_hook_status(state: &HookState, session_id: &str) -> Option<HookStatus
     let map = state.lock().ok()?;
     let status = map.get(session_id)?;
 
+    // WaitingInput never expires on TTL — only replaced by the next hook event
+    if status.status == "WaitingInput" {
+        return Some(status.clone());
+    }
+
+    // Other statuses expire after 60s, falling back to JSONL inference
     if status.timestamp.elapsed() > std::time::Duration::from_secs(60) {
         None
     } else {

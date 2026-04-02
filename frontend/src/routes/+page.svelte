@@ -186,6 +186,82 @@
 		return session.slug || `${session.source}:${session.pid}`;
 	}
 
+	interface ProcessedMessage {
+		type: 'user' | 'assistant' | 'tool_op' | 'thinking' | 'system';
+		text?: string;
+		timestamp?: string | null;
+		toolName?: string;
+		toolSummary?: string;
+		toolResult?: string | null;
+		isError?: boolean;
+	}
+
+	function processMessages(msgs: ConversationMessage[]): ProcessedMessage[] {
+		const out: ProcessedMessage[] = [];
+		let i = 0;
+		while (i < msgs.length) {
+			const msg = msgs[i];
+
+			if (msg.messageType === 'tool_use') {
+				// Look ahead for matching tool_result
+				const next = msgs[i + 1];
+				const result = next?.messageType === 'tool_result' ? next : null;
+				out.push({
+					type: 'tool_op',
+					toolName: msg.toolName || 'unknown',
+					toolSummary: shortenToolSummary(msg.toolInputSummary || ''),
+					toolResult: result?.toolResultContent,
+					isError: result?.isError ?? false,
+				});
+				if (result) i += 2; else i += 1;
+				continue;
+			}
+
+			if (msg.messageType === 'tool_result') {
+				// Orphan tool_result (no preceding tool_use) — show if error
+				if (msg.isError) {
+					out.push({
+						type: 'tool_op',
+						toolName: '?',
+						toolSummary: '',
+						toolResult: msg.toolResultContent,
+						isError: true,
+					});
+				}
+				i++; continue;
+			}
+
+			if (msg.messageType === 'text' && msg.role === 'user') {
+				out.push({ type: 'user', text: msg.text || '', timestamp: msg.timestamp });
+			} else if (msg.messageType === 'text' && msg.role === 'assistant') {
+				out.push({ type: 'assistant', text: msg.text || '' });
+			} else if (msg.messageType === 'thinking') {
+				out.push({ type: 'thinking', text: msg.text || '' });
+			} else if (msg.role === 'system') {
+				out.push({ type: 'system', text: msg.text || '' });
+			}
+			i++;
+		}
+		return out;
+	}
+
+	function shortenToolSummary(summary: string): string {
+		// "Edit: /Users/rugvedambekar/Alphabyte/eCommerce/code/file.tsx" → "Edit: .../code/file.tsx"
+		return summary.replace(/\/Users\/[^/]+\//g, '~/').replace(/(~\/[^/]+\/[^/]+\/)(.+\/)/g, (_, prefix, middle) => {
+			const parts = middle.split('/').filter(Boolean);
+			if (parts.length > 2) return prefix + '.../' + parts.slice(-1)[0] + '/';
+			return prefix + middle;
+		});
+	}
+
+	function isSuccessResult(result: string | null | undefined): boolean {
+		if (!result) return true; // no result content = assume success
+		return result.includes('has been updated successfully') ||
+			result.includes('successfully') ||
+			result.trim() === '' ||
+			result === '[Output saved to file]';
+	}
+
 	function renderText(text: string): string {
 		// Escape HTML
 		let s = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -325,7 +401,6 @@
 
 									<div class="session-status-tag" style="
 										color: {meta.color};
-										border-color: {meta.color}40;
 										background: {meta.dim};
 									">
 										{meta.label}
@@ -377,35 +452,44 @@
 					{:else if conversationData.messages.length === 0}
 						<div class="conv-loading">Conversation is empty</div>
 					{:else}
-						{#each conversationData.messages as msg}
-							{#if msg.messageType === 'text' && msg.role === 'user'}
+						{@const processed = processMessages(conversationData.messages)}
+						{#each processed as pm, pi}
+							{#if pm.type === 'user'}
 								<div class="msg msg-user">
-									<span class="msg-time">{formatTime(msg.timestamp)}</span>
-									<div class="msg-content">{@html renderText(msg.text || '')}</div>
+									<span class="msg-time">{formatTime(pm.timestamp ?? null)}</span>
+									<div class="msg-content">{@html renderText(pm.text || '')}</div>
 								</div>
-							{:else if msg.messageType === 'text' && msg.role === 'assistant'}
+							{:else if pm.type === 'assistant'}
 								<div class="msg msg-assistant">
-									<div class="msg-content">{@html renderText(msg.text || '')}</div>
+									<div class="msg-content">{@html renderText(pm.text || '')}</div>
 								</div>
-							{:else if msg.messageType === 'tool_use'}
-								<div class="msg msg-tool-use">
-									<span class="tool-badge">{msg.toolName}</span>
-									<span class="tool-summary">{msg.toolInputSummary || ''}</span>
-								</div>
-							{:else if msg.messageType === 'tool_result'}
-								<div class="msg msg-tool-result" class:error={msg.isError}>
-									{#if msg.isError}
-										<span class="tool-error-label">ERROR</span>
+							{:else if pm.type === 'tool_op'}
+								{@const success = !pm.isError && isSuccessResult(pm.toolResult)}
+								{@const prevIsTool = pi > 0 && processed[pi - 1].type === 'tool_op'}
+								<div class="msg msg-tool-op" class:tool-group-item={prevIsTool} class:tool-error={pm.isError}>
+									<span class="tool-name">{pm.toolName}</span>
+									<span class="tool-target">{pm.toolSummary}</span>
+									{#if success}
+										<span class="tool-ok">✓</span>
+									{:else if pm.isError}
+										<details class="tool-err-details">
+											<summary class="tool-err-marker">✗</summary>
+											<pre class="tool-err-content">{pm.toolResult || ''}</pre>
+										</details>
+									{:else if pm.toolResult}
+										<details class="tool-output-details">
+											<summary class="tool-out-marker">⋯</summary>
+											<pre class="tool-out-content">{pm.toolResult}</pre>
+										</details>
 									{/if}
-									<pre class="tool-output">{msg.toolResultContent || ''}</pre>
 								</div>
-							{:else if msg.messageType === 'thinking'}
+							{:else if pm.type === 'thinking'}
 								<details class="msg msg-thinking">
-									<summary>Thinking...</summary>
-									<p>{msg.text || ''}</p>
+									<summary>thinking</summary>
+									<p>{pm.text || ''}</p>
 								</details>
-							{:else if msg.role === 'system'}
-								<div class="msg msg-system">{msg.text || ''}</div>
+							{:else if pm.type === 'system'}
+								<div class="msg msg-system">{pm.text || ''}</div>
 							{/if}
 						{/each}
 					{/if}
@@ -471,13 +555,6 @@
 		z-index: 2;
 		transition: background-color 0.3s ease;
 	}
-	.top-bar::after {
-		content: '';
-		position: absolute;
-		bottom: -1px; left: 0; right: 0;
-		height: 1px;
-		background: linear-gradient(90deg, transparent, var(--color-accent)15, transparent);
-	}
 	.top-bar-left, .top-bar-right {
 		display: flex;
 		align-items: center;
@@ -499,8 +576,8 @@
 	}
 	.theme-btn {
 		background: none;
-		border: 1px var(--border-style) var(--color-border);
-		color: var(--color-text-secondary);
+		border: none;
+		color: var(--color-text-dim);
 		font-size: 14px;
 		width: 28px; height: 28px;
 		display: flex; align-items: center; justify-content: center;
@@ -509,7 +586,6 @@
 		transition: all 0.15s ease;
 	}
 	.theme-btn:hover {
-		border-color: var(--color-accent);
 		color: var(--color-accent);
 		background: var(--color-surface-hover);
 	}
@@ -528,9 +604,7 @@
 		display: flex; align-items: center; justify-content: center;
 		gap: 8px;
 		padding: 7px 12px;
-		border-right: 1px var(--border-style) var(--color-border);
 	}
-	.status-strip-cell:last-child { border-right: none; }
 	.strip-label {
 		font-size: 9px; letter-spacing: 0.15em;
 		color: var(--color-text-dim);
@@ -563,10 +637,10 @@
 	.session-list-pane {
 		flex: 1;
 		overflow-y: auto;
-		padding: 14px 18px;
+		padding: 16px 20px;
 		display: flex;
 		flex-direction: column;
-		gap: 18px;
+		gap: 22px;
 	}
 	.main-area.panel-open .session-list-pane {
 		flex: 0 0 42%;
@@ -587,7 +661,7 @@
 	.project-block { animation: boot-in 0.3s ease-out both; }
 	.project-header {
 		display: flex; align-items: center; justify-content: space-between;
-		padding: 0 2px 6px;
+		padding: 0 4px 8px;
 	}
 	.project-header-left { display: flex; align-items: center; gap: 8px; }
 	.project-marker { font-size: 7px; color: var(--color-accent); }
@@ -597,22 +671,21 @@
 		color: var(--color-text-secondary);
 	}
 	.project-count {
-		font-family: var(--font-data); font-size: 10px; color: var(--color-text-dim);
-		border: 1px var(--border-style) var(--color-border);
-		padding: 1px 6px; line-height: 1.3; border-radius: var(--radius);
+		font-family: var(--font-data); font-size: 10px; color: var(--color-text-ghost);
 	}
 	.project-path { font-family: var(--font-data); font-size: 10px; color: var(--color-text-ghost); }
 
 	/* ── Session List ── */
-	.session-list { display: flex; flex-direction: column; gap: 3px; }
+	.session-list { display: flex; flex-direction: column; gap: 6px; }
 
 	/* ── Session Row ── */
 	.session-row {
 		display: flex; align-items: flex-start; gap: 10px;
 		padding: 10px 14px;
-		background: var(--color-surface);
-		border: 1px var(--border-style) var(--color-border);
-		border-left: var(--row-border-left-width) var(--border-style) var(--row-color, var(--color-text-ghost));
+		background: transparent;
+		border: none;
+		border-left: var(--row-border-left-width) solid var(--row-color, var(--color-text-ghost));
+		border-bottom: 1px solid var(--color-border);
 		border-radius: var(--radius);
 		cursor: pointer; text-align: left; width: 100%;
 		transition: all 0.12s ease;
@@ -620,20 +693,16 @@
 		position: relative;
 	}
 	.session-row:hover {
-		background: var(--color-surface-hover);
-		border-color: var(--color-border-bright);
-		border-left-color: var(--row-color);
+		background: var(--color-surface);
 	}
 	.session-row:hover .session-slug { color: var(--color-text-primary); }
 
 	.session-viewing {
-		background: var(--color-surface-hover);
-		border-color: var(--color-accent)40;
+		background: var(--color-surface);
 	}
 
 	.session-waiting {
 		background: var(--color-urgent-dim);
-		border-color: var(--color-border-bright);
 	}
 	.session-waiting::after {
 		content: '';
@@ -691,7 +760,6 @@
 	.session-status-tag {
 		font-family: var(--font-display); font-size: 9px; font-weight: 500;
 		letter-spacing: 0.12em; padding: 3px 8px;
-		border: 1px var(--border-style);
 		border-radius: var(--radius); flex-shrink: 0; margin-top: 1px;
 	}
 
@@ -701,12 +769,12 @@
 		flex-shrink: 0; margin-top: 1px;
 	}
 
-	/* ── View Button ── */
+	/* ── Focus Button ── */
 	.session-focus-btn {
 		opacity: 0;
 		background: none;
-		border: 1px var(--border-style) var(--color-border);
-		color: var(--color-text-dim);
+		border: none;
+		color: var(--color-text-ghost);
 		width: 24px; height: 24px; font-size: 11px;
 		display: flex; align-items: center; justify-content: center;
 		cursor: pointer;
@@ -717,7 +785,6 @@
 	.session-row:hover .session-focus-btn { opacity: 1; }
 	.session-focus-btn:hover {
 		color: var(--color-accent);
-		border-color: var(--color-accent);
 		background: var(--color-surface-hover);
 	}
 
@@ -753,8 +820,8 @@
 	}
 	.conv-btn {
 		background: none;
-		border: 1px var(--border-style) var(--color-border);
-		color: var(--color-text-secondary);
+		border: none;
+		color: var(--color-text-dim);
 		width: 26px; height: 26px; font-size: 13px;
 		display: flex; align-items: center; justify-content: center;
 		cursor: pointer;
@@ -762,7 +829,6 @@
 		transition: all 0.12s ease;
 	}
 	.conv-btn:hover {
-		border-color: var(--color-accent);
 		color: var(--color-accent);
 		background: var(--color-surface-hover);
 	}
@@ -770,10 +836,10 @@
 	.conversation-messages {
 		flex: 1;
 		overflow-y: auto;
-		padding: 12px 16px;
+		padding: 14px 18px;
 		display: flex;
 		flex-direction: column;
-		gap: 6px;
+		gap: 4px;
 	}
 
 	.conv-loading {
@@ -792,10 +858,11 @@
 	}
 
 	.msg-user {
-		padding: 8px 12px;
+		padding: 10px 12px;
 		background: var(--color-surface);
 		border-left: 2px solid var(--color-accent);
 		color: var(--color-text-primary);
+		margin-top: 6px;
 	}
 	.msg-time {
 		font-family: var(--font-data); font-size: 9px; color: var(--color-text-ghost);
@@ -807,54 +874,66 @@
 		color: var(--color-text-primary);
 	}
 
-	.msg-tool-use {
-		padding: 6px 10px;
-		background: var(--color-surface);
-		border: 1px var(--border-style) var(--color-border);
-		display: flex; align-items: center; gap: 8px;
-		font-family: var(--font-data); font-size: 11px;
+	/* ── Tool Operations (merged tool_use + tool_result) ── */
+	.msg-tool-op {
+		display: flex; align-items: center; gap: 6px;
+		padding: 3px 10px;
+		font-family: var(--font-data); font-size: 10px;
+		color: var(--color-text-dim);
+		margin-top: 2px;
 	}
-	.tool-badge {
+	.msg-tool-op.tool-group-item {
+		margin-top: 0;
+	}
+	.tool-name {
 		font-family: var(--font-display); font-size: 8px; font-weight: 600;
-		letter-spacing: 0.1em; text-transform: uppercase;
-		color: var(--color-accent);
-		padding: 1px 6px;
-		border: 1px var(--border-style) var(--color-border);
-		border-radius: var(--radius);
+		letter-spacing: 0.08em; text-transform: uppercase;
+		color: var(--color-text-ghost);
+		flex-shrink: 0;
+		min-width: 32px;
+	}
+	.tool-target {
+		color: var(--color-text-dim);
+		overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+		flex: 1; min-width: 0;
+	}
+	.tool-ok {
+		color: var(--color-status-active);
+		font-size: 10px; flex-shrink: 0;
+	}
+	.tool-err-details, .tool-output-details {
 		flex-shrink: 0;
 	}
-	.tool-summary { color: var(--color-text-dim); }
-
-	.msg-tool-result {
-		padding: 6px 10px;
-		background: var(--color-void);
-		border: 1px var(--border-style) var(--color-border);
+	.tool-err-marker {
+		color: var(--color-urgent); cursor: pointer; font-size: 10px;
 	}
-	.msg-tool-result.error {
-		border-color: var(--color-urgent)30;
+	.tool-out-marker {
+		color: var(--color-text-ghost); cursor: pointer; font-size: 10px;
 	}
-	.tool-error-label {
-		font-family: var(--font-display); font-size: 8px; font-weight: 600;
-		letter-spacing: 0.1em; color: var(--color-urgent);
-		display: block; margin-bottom: 4px;
-	}
-	.tool-output {
+	.tool-err-content, .tool-out-content {
 		font-family: var(--font-data); font-size: 10px; color: var(--color-text-dim);
-		margin: 0; white-space: pre-wrap; word-break: break-all;
+		margin: 4px 0 0; white-space: pre-wrap; word-break: break-all;
 		max-height: 120px; overflow-y: auto;
+		padding: 4px 8px;
+		background: var(--color-void);
+		border-radius: var(--radius);
+	}
+	.msg-tool-op.tool-error {
+		border-left: 2px solid var(--color-urgent);
 	}
 
 	.msg-thinking {
-		font-size: 11px; color: var(--color-text-ghost); font-style: italic;
-		padding: 4px 12px;
+		font-size: 10px; color: var(--color-text-ghost);
+		padding: 2px 12px;
 	}
 	.msg-thinking summary {
 		cursor: pointer;
-		font-family: var(--font-data); font-size: 10px;
+		font-family: var(--font-data); font-size: 9px;
 		color: var(--color-text-ghost);
+		letter-spacing: 0.05em;
 	}
 	.msg-thinking p {
-		margin: 4px 0 0; font-style: normal;
+		margin: 4px 0 0;
 		font-family: var(--font-body); font-size: 11px; color: var(--color-text-dim);
 	}
 
@@ -873,7 +952,6 @@
 		overflow-x: auto;
 		white-space: pre;
 		margin: 4px 0;
-		border: 1px var(--border-style) var(--color-border);
 	}
 	:global(.inline-code) {
 		background: var(--color-surface);
@@ -892,7 +970,6 @@
 	.bottom-bar {
 		display: flex; align-items: center; justify-content: center;
 		gap: 20px; padding: 5px 20px;
-		border-top: 1px var(--border-style) var(--color-border);
 		background: var(--color-void);
 		position: relative; z-index: 2;
 		transition: background-color 0.3s ease;

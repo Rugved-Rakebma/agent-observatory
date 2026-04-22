@@ -50,6 +50,7 @@
 	let lastScan = $state('');
 	let clock = $state('');
 	let booted = $state(false);
+	let scanning = $state(false);
 	let theme: Theme = $state((localStorage.getItem('observatory-theme') as Theme) || 'nightfall');
 
 	// Conversation panel state
@@ -73,15 +74,20 @@
 		const clockInterval = setInterval(tick, 1000);
 
 		try {
+			scanning = true;
 			groups = await invoke('get_session_groups');
 			lastScan = new Date().toLocaleTimeString('en-US', { hour12: false });
+			setTimeout(() => { scanning = false; }, 600);
 		} catch (e) {
 			console.error('Failed to scan sessions:', e);
+			scanning = false;
 		}
 
 		await listen<ProjectGroup[]>('sessions-changed', async (event) => {
+			scanning = true;
 			groups = event.payload;
 			lastScan = new Date().toLocaleTimeString('en-US', { hour12: false });
+			setTimeout(() => { scanning = false; }, 600);
 
 			// Auto-refresh conversation if one is open
 			if (viewingSession && !conversationLoading) {
@@ -294,7 +300,7 @@
 </script>
 
 <div class="observatory" class:booted>
-	<div class="scan-beam"></div>
+	<div class="scan-beam" class:active={scanning}></div>
 
 	<header class="top-bar">
 		<div class="top-bar-left">
@@ -537,10 +543,13 @@
 		top: 0; left: 0; right: 0;
 		height: 1px;
 		background: linear-gradient(90deg, transparent 0%, var(--color-accent) 50%, transparent 100%);
-		opacity: 0.06;
+		opacity: 0;
 		z-index: 10;
-		animation: scan 14s linear infinite;
 		pointer-events: none;
+	}
+	.scan-beam.active {
+		opacity: 0.15;
+		animation: scan 0.5s ease-out forwards;
 	}
 
 	/* ── Top Bar ── */

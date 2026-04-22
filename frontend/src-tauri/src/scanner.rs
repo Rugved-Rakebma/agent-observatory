@@ -93,9 +93,14 @@ fn read_session_file(path: &Path, hook_state: &HookState, cache: &EnrichmentCach
     // Always enrich for metadata (slug, model, context, message)
     let enriched = enrichment::enrich_session(&file.session_id, &file.cwd, cache);
 
-    // Hook status takes priority for status/activity
+    // Hook status takes priority, but stale WaitingInput yields to JSONL
     let (status, activity, tool_detail) = if let Some(hook) = hooks::get_hook_status(hook_state, &file.session_id) {
-        (hook.status, hook.activity, hook.tool_detail)
+        // If hook says WaitingInput but JSONL shows the session moved on, trust JSONL
+        if hook.status == "WaitingInput" && enriched.status != "WaitingInput" && enriched.status != "Unknown" {
+            (enriched.status, enriched.activity, None)
+        } else {
+            (hook.status, hook.activity, hook.tool_detail)
+        }
     } else {
         (enriched.status, enriched.activity, None)
     };

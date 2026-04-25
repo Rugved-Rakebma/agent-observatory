@@ -9,5 +9,14 @@ frontend/build/
 # Bun
 frontend/bun.lock
 
+# R&D state
+.rnd/
+
+# IDE
+.vscode/
+
+# Claude Code local settings
+.claude/
+
 # OS
 .DS_Store

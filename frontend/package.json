@@ -1,7 +1,10 @@
 {
-	"name": "frontend",
+	"name": "agent-observatory",
+	"description": "Live control room for Claude Code sessions",
+	"version": "0.1.0",
+	"author": "Rugved Ambekar",
+	"license": "MIT",
 	"private": true,
-	"version": "0.0.1",
 	"type": "module",
 	"scripts": {
 		"dev": "vite dev",

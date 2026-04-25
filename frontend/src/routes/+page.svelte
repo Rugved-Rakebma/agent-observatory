@@ -252,7 +252,7 @@
 	}
 
 	function shortenToolSummary(summary: string): string {
-		// "Edit: /Users/rugvedambekar/Alphabyte/eCommerce/code/file.tsx" → "Edit: .../code/file.tsx"
+		// "Edit: ~/SomeProject/SubDir/deep/path/file.tsx" → "Edit: .../path/file.tsx"
 		return summary.replace(/\/Users\/[^/]+\//g, '~/').replace(/(~\/[^/]+\/[^/]+\/)(.+\/)/g, (_, prefix, middle) => {
 			const parts = middle.split('/').filter(Boolean);
 			if (parts.length > 2) return prefix + '.../' + parts.slice(-1)[0] + '/';

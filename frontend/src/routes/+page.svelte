@@ -43,6 +43,13 @@
 		totalEntries: number;
 	}
 
+	interface DiscoverableProject {
+		path: string;
+		display_name: string;
+		agents: string[];
+		active_sessions: number;
+	}
+
 	const THEMES = ['nightfall', 'fieldcom', 'warmdesk'] as const;
 	type Theme = typeof THEMES[number];
 
@@ -58,6 +65,14 @@
 	let conversationData: ConversationData | null = $state(null);
 	let conversationLoading = $state(false);
 
+	// Projects view state
+	type ViewMode = 'sessions' | 'projects';
+	let viewMode: ViewMode = $state('sessions');
+	let projects: DiscoverableProject[] = $state([]);
+	let projectsLoaded = $state(false);
+	let projectsLoading = $state(false);
+	let launchingPath: string | null = $state(null);
+
 	$effect(() => {
 		document.documentElement.setAttribute('data-theme', theme);
 		localStorage.setItem('observatory-theme', theme);
@@ -67,11 +82,11 @@
 		document.documentElement.setAttribute('data-theme', theme);
 		setTimeout(() => { booted = true; }, 100);
 
-		const tick = () => {
+		const updateClock = () => {
 			clock = new Date().toLocaleTimeString('en-US', { hour12: false });
 		};
-		tick();
-		const clockInterval = setInterval(tick, 1000);
+		updateClock();
+		const clockInterval = setInterval(updateClock, 1000);
 
 		try {
 			scanning = true;
@@ -162,6 +177,46 @@
 	function closeConversation() {
 		viewingSession = null;
 		conversationData = null;
+	}
+
+	async function loadProjects() {
+		if (projectsLoading) return;
+		projectsLoading = true;
+		try {
+			projects = await invoke('get_discoverable_projects');
+			projectsLoaded = true;
+		} catch (e) {
+			console.error('Failed to load projects:', e);
+		}
+		projectsLoading = false;
+	}
+
+	async function switchView(mode: ViewMode) {
+		viewMode = mode;
+		if (mode === 'projects' && !projectsLoaded) {
+			await loadProjects();
+		}
+		if (mode === 'projects') {
+			closeConversation();
+		}
+	}
+
+	async function refreshProjects() {
+		projectsLoaded = false;
+		await loadProjects();
+	}
+
+	async function launchSession(project: DiscoverableProject, agent?: string) {
+		launchingPath = project.path;
+		try {
+			await invoke('launch_claude_session', {
+				path: project.path,
+				agent: agent || null
+			});
+		} catch (e) {
+			console.error('Failed to launch session:', e);
+		}
+		setTimeout(() => { launchingPath = null; }, 1500);
 	}
 
 	function elapsed(startedAt: number): string {
@@ -306,7 +361,18 @@
 		<div class="top-bar-left">
 			<span class="observatory-title">OBSERVATORY</span>
 			<span class="top-bar-divider">│</span>
-			<span class="top-bar-meta">v0.5</span>
+			<div class="view-toggle">
+				<button
+					class="view-toggle-btn"
+					class:active={viewMode === 'sessions'}
+					onclick={() => switchView('sessions')}
+				>SESSIONS</button>
+				<button
+					class="view-toggle-btn"
+					class:active={viewMode === 'projects'}
+					onclick={() => switchView('projects')}
+				>PROJECTS</button>
+			</div>
 		</div>
 		<div class="top-bar-right">
 			<button class="theme-btn" onclick={cycleTheme} title="Switch theme">
@@ -335,7 +401,8 @@
 		</div>
 	</div>
 
-	<main class="main-area" class:panel-open={viewingSession}>
+	<main class="main-area" class:panel-open={viewingSession && viewMode === 'sessions'}>
+		{#if viewMode === 'sessions'}
 		<div class="session-list-pane">
 			{#if groups.length === 0}
 				<div class="empty-state">
@@ -431,8 +498,94 @@
 				{/each}
 			{/if}
 		</div>
+		{:else}
+		<!-- Projects View -->
+		<div class="projects-pane">
+			<div class="projects-toolbar">
+				<span class="projects-count">
+					{#if projectsLoaded}
+						{projects.length} projects
+					{:else}
+						—
+					{/if}
+				</span>
+				<button class="conv-btn" onclick={refreshProjects} title="Refresh projects">↻</button>
+			</div>
 
-		{#if viewingSession}
+			{#if projectsLoading}
+				<div class="empty-state">
+					<div class="empty-glyph">◇</div>
+					<p class="empty-text">SCANNING PROJECTS...</p>
+				</div>
+			{:else if projects.length === 0}
+				<div class="empty-state">
+					<div class="empty-glyph">◇</div>
+					<p class="empty-text">NO PROJECTS FOUND</p>
+					<p class="empty-sub">~/.claude/projects/</p>
+				</div>
+			{:else}
+				<div class="projects-list">
+					{#each projects as project, pi}
+						<div
+							class="project-card"
+							class:project-active={project.active_sessions > 0}
+							class:project-launching={launchingPath === project.path}
+							style="animation-delay: {pi * 40}ms;"
+						>
+							<div class="project-card-header">
+								<div class="project-card-left">
+									<span class="project-card-marker" class:marker-active={project.active_sessions > 0}>
+										{project.active_sessions > 0 ? '■' : '□'}
+									</span>
+									<span class="project-card-name">{project.display_name}</span>
+									{#if project.active_sessions > 0}
+										<span class="project-card-sessions">{project.active_sessions} active</span>
+									{/if}
+								</div>
+								<div class="project-card-actions">
+									{#if project.agents.length > 0}
+										<div class="agent-dropdown-wrap">
+											<select
+												class="agent-select"
+												onchange={(e) => {
+													const target = e.target as HTMLSelectElement;
+													const val = target.value;
+													if (val) {
+														launchSession(project, val);
+														target.value = '';
+													}
+												}}
+											>
+												<option value="">agents</option>
+												{#each project.agents as agent}
+													<option value={agent}>{agent}</option>
+												{/each}
+											</select>
+										</div>
+									{/if}
+									<button
+										class="launch-btn"
+										onclick={() => launchSession(project)}
+										title="Launch new Claude session"
+									>+</button>
+								</div>
+							</div>
+							<span class="project-card-path">{shortPath(project.path)}</span>
+							{#if project.agents.length > 0}
+								<div class="project-card-agents">
+									{#each project.agents as agent}
+										<span class="agent-tag">{agent}</span>
+									{/each}
+								</div>
+							{/if}
+						</div>
+					{/each}
+				</div>
+			{/if}
+		</div>
+		{/if}
+
+		{#if viewingSession && viewMode === 'sessions'}
 			<div class="conversation-panel">
 				<div class="conversation-header">
 					<div class="conversation-header-left">
@@ -505,9 +658,15 @@
 	</main>
 
 	<footer class="bottom-bar">
-		<span class="bottom-meta">CLICK TO VIEW</span>
-		<span class="bottom-meta">→ GO TO TERMINAL</span>
-		<span class="bottom-meta">POLL 10s</span>
+		{#if viewMode === 'sessions'}
+			<span class="bottom-meta">CLICK TO VIEW</span>
+			<span class="bottom-meta">→ GO TO TERMINAL</span>
+			<span class="bottom-meta">POLL 10s</span>
+		{:else}
+			<span class="bottom-meta">+ LAUNCH SESSION</span>
+			<span class="bottom-meta">AGENTS VIA DROPDOWN</span>
+			<span class="bottom-meta">↻ REFRESH</span>
+		{/if}
 	</footer>
 </div>
 
@@ -986,5 +1145,195 @@
 	.bottom-meta {
 		font-family: var(--font-data); font-size: 9px; letter-spacing: 0.08em;
 		color: var(--color-text-ghost);
+	}
+
+	/* ── View Toggle ── */
+	.view-toggle {
+		display: flex;
+		gap: 0;
+		border: 1px var(--border-style) var(--color-border);
+		border-radius: var(--radius);
+		overflow: hidden;
+	}
+	.view-toggle-btn {
+		background: none;
+		border: none;
+		font-family: var(--font-display);
+		font-size: 9px;
+		font-weight: 500;
+		letter-spacing: 0.12em;
+		color: var(--color-text-ghost);
+		padding: 4px 12px;
+		cursor: pointer;
+		transition: all 0.15s ease;
+	}
+	.view-toggle-btn:hover {
+		color: var(--color-text-dim);
+		background: var(--color-surface-hover);
+	}
+	.view-toggle-btn.active {
+		color: var(--color-accent);
+		background: var(--color-surface);
+	}
+
+	/* ── Projects Pane ── */
+	.projects-pane {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+	}
+	.projects-toolbar {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 10px 20px;
+		border-bottom: 1px var(--border-style) var(--color-border);
+		flex-shrink: 0;
+	}
+	.projects-count {
+		font-family: var(--font-data);
+		font-size: 11px;
+		color: var(--color-text-dim);
+	}
+	.projects-list {
+		flex: 1;
+		overflow-y: auto;
+		padding: 16px 20px;
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+
+	/* ── Project Card ── */
+	.project-card {
+		padding: 12px 14px;
+		border: 1px var(--border-style) var(--color-border);
+		border-radius: var(--radius);
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+		transition: all 0.12s ease;
+		animation: boot-in 0.3s ease-out both;
+	}
+	.project-card:hover {
+		background: var(--color-surface);
+		border-color: var(--color-border-bright);
+	}
+	.project-active {
+		border-left: 3px solid var(--color-status-active);
+	}
+	.project-launching {
+		opacity: 0.6;
+		pointer-events: none;
+	}
+	.project-card-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 10px;
+	}
+	.project-card-left {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		min-width: 0;
+	}
+	.project-card-marker {
+		font-size: 8px;
+		color: var(--color-text-ghost);
+		flex-shrink: 0;
+	}
+	.project-card-marker.marker-active {
+		color: var(--color-status-active);
+	}
+	.project-card-name {
+		font-family: var(--font-body);
+		font-size: 13px;
+		font-weight: 500;
+		color: var(--color-text-primary);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.project-card-sessions {
+		font-family: var(--font-data);
+		font-size: 10px;
+		color: var(--color-status-active);
+		flex-shrink: 0;
+	}
+	.project-card-actions {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		flex-shrink: 0;
+	}
+	.project-card-path {
+		font-family: var(--font-data);
+		font-size: 10px;
+		color: var(--color-text-ghost);
+	}
+	.project-card-agents {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 4px;
+	}
+	.agent-tag {
+		font-family: var(--font-data);
+		font-size: 9px;
+		color: var(--color-text-dim);
+		background: var(--color-surface);
+		padding: 2px 6px;
+		border-radius: var(--radius);
+		border: 1px solid var(--color-border);
+	}
+
+	/* ── Agent Dropdown ── */
+	.agent-dropdown-wrap {
+		position: relative;
+	}
+	.agent-select {
+		appearance: none;
+		background: var(--color-surface);
+		border: 1px solid var(--color-border);
+		color: var(--color-text-dim);
+		font-family: var(--font-data);
+		font-size: 10px;
+		padding: 3px 20px 3px 8px;
+		border-radius: var(--radius);
+		cursor: pointer;
+		transition: all 0.12s ease;
+		min-width: 70px;
+	}
+	.agent-select:hover {
+		border-color: var(--color-border-bright);
+		color: var(--color-text-secondary);
+	}
+	.agent-select:focus {
+		outline: none;
+		border-color: var(--color-accent);
+	}
+
+	/* ── Launch Button ── */
+	.launch-btn {
+		width: 26px;
+		height: 26px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: none;
+		border: 1px solid var(--color-border);
+		color: var(--color-text-dim);
+		font-size: 16px;
+		font-weight: 300;
+		border-radius: var(--radius);
+		cursor: pointer;
+		transition: all 0.15s ease;
+		line-height: 1;
+	}
+	.launch-btn:hover {
+		border-color: var(--color-accent);
+		color: var(--color-accent);
+		background: var(--color-surface);
 	}
 </style>

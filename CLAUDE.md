@@ -22,18 +22,23 @@ Tauri 2 desktop app for monitoring all active Claude Code sessions on macOS.
 - **Terminal detection**: `KERN_PROCARGS2` reads `TERM_PROGRAM` from Claude processes
 - **Click-to-focus**: AppleScript for iTerm2 (tab-level via session UUID), app activation for others
 
+- **Project discovery** (`discovery.rs`): walks home directory (max depth 6) to find all directories containing `.claude/` configs. Skips `node_modules`, `target`, `Library`, etc. Detects custom agents from `.claude/agents/*.md`. Launches new sessions via iTerm2 AppleScript.
+- **Two views**: Sessions (live monitoring) and Projects (launcher). Toggle in top bar. Projects lazy-loaded on first access.
+
 ## Project Structure
 
 ```
 frontend/
   src/                    # Svelte 5 frontend
-    routes/+page.svelte   # Main dashboard UI (3-row agent cards)
+    routes/+page.svelte   # Main dashboard UI — sessions + projects views
     app.css               # Tailwind theme + animations
   src-tauri/src/
     lib.rs                # Tauri setup, commands, poll timer, cache pruning
     scanner.rs            # Session discovery, PID validation, terminal detection
     enrichment.rs         # JSONL parsing, mtime cache, metadata extraction
     hooks.rs              # axum hook receiver server
+    discovery.rs           # Project discovery (filesystem walk), agent detection, launcher
+    conversation.rs        # Conversation JSONL parser
 ```
 
 ## Just Recipes

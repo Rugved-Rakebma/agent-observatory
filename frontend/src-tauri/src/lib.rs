@@ -1,4 +1,5 @@
 mod conversation;
+mod discovery;
 mod enrichment;
 mod hooks;
 mod scanner;
@@ -90,6 +91,18 @@ fn run_osascript(script: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn get_discoverable_projects(state: tauri::State<AppState>) -> Vec<discovery::DiscoverableProject> {
+    let groups = scan_sessions(&state.hook_state, &state.cache);
+    let active_cwds: Vec<String> = groups.iter().map(|g| g.cwd.clone()).collect();
+    discovery::scan_projects(&active_cwds)
+}
+
+#[tauri::command]
+fn launch_claude_session(path: String, agent: Option<String>) -> Result<(), String> {
+    discovery::launch_session(&path, agent.as_deref())
+}
+
 fn prune_cache(cache: &EnrichmentCache, groups: &[ProjectGroup]) {
     let active_ids: Vec<String> = groups
         .iter()
@@ -140,7 +153,7 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_session_groups, get_conversation, focus_session])
+        .invoke_handler(tauri::generate_handler![get_session_groups, get_conversation, focus_session, get_discoverable_projects, launch_claude_session])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

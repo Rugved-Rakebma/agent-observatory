@@ -372,11 +372,50 @@ fn context_max_for_model(raw: &str) -> u64 {
 pub(crate) fn find_jsonl_path(session_id: &str, raw_cwd: &str) -> Option<PathBuf> {
     let home = dirs::home_dir()?;
     let encoded = raw_cwd.replace('/', "-").replace(' ', "-");
-    let path = home
-        .join(".claude")
-        .join("projects")
-        .join(&encoded)
-        .join(format!("{}.jsonl", session_id));
+    let project_dir = home.join(".claude").join("projects").join(&encoded);
+    let path = project_dir.join(format!("{}.jsonl", session_id));
+
+    // If the exact session JSONL exists and is recently modified, use it
+    if path.exists() {
+        let mtime = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
+        let age = mtime.and_then(|m| m.elapsed().ok()).map(|d| d.as_secs());
+        // If modified within last 5 minutes, trust it
+        if age.map_or(false, |a| a < 300) {
+            return Some(path);
+        }
+    }
+
+    // Otherwise, find the most recently modified JSONL in the project dir.
+    // This handles /clear creating a new session without updating the session file.
+    let newest = std::fs::read_dir(&project_dir)
+        .ok()?
+        .flatten()
+        .filter(|e| {
+            e.path()
+                .extension()
+                .and_then(|ext| ext.to_str())
+                == Some("jsonl")
+        })
+        .max_by_key(|e| {
+            e.metadata()
+                .and_then(|m| m.modified())
+                .unwrap_or(SystemTime::UNIX_EPOCH)
+        })?;
+
+    let newest_path = newest.path();
+    // Only prefer the newest if it's more recent than the original
+    if newest_path != path {
+        let newest_mtime = std::fs::metadata(&newest_path)
+            .and_then(|m| m.modified())
+            .ok();
+        let original_mtime = std::fs::metadata(&path)
+            .and_then(|m| m.modified())
+            .ok();
+        if newest_mtime > original_mtime {
+            return Some(newest_path);
+        }
+    }
+
     path.exists().then_some(path)
 }
 
